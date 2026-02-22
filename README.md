@@ -76,14 +76,20 @@ On the first run, the tool will automatically create a configuration template at
 
 Because we symlinked `aitranscribe` to our global path, we can run it simply by typing `aitranscribe` from any directory on our system!
 
+**Record from microphone (Default Mode, Push-to-Talk via Spacebar):**
+```bash
+aitranscribe
+```
+
 **Transcribe a local file:**
 ```bash
 aitranscribe file path/to/audio.mp3
 ```
 
-**Record from microphone (Push-to-Talk via Spacebar):**
+**Transcribe previous recording:**
 ```bash
-aitranscribe record
+# Running "file" without arguments defaults to /tmp/aitranscribe_record.wav
+aitranscribe file
 ```
 
 **Transcribe a large file (auto-chunking applied automatically):**
