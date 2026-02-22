@@ -20,6 +20,7 @@ try:
         verbose_option,
         new_option,
         english_option,
+        help_option,
         apply_english_translation,
         cleanup_old_records,
         validate_api_keys,
@@ -80,6 +81,11 @@ def test_new_option():
 def test_english_option():
     """Test that english_option returns correct typer.Option."""
     option = english_option()
+    assert isinstance(option, typer.models.OptionInfo)
+
+def test_help_option():
+    """Test that help_option returns correct typer.Option."""
+    option = help_option()
     assert isinstance(option, typer.models.OptionInfo)
 
 

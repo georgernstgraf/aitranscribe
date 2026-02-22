@@ -34,7 +34,10 @@ def new_option():
     return typer.Option(False, "--new", "-n", help="Start fresh: Delete all previous 'aitranscribe_record' files")
 
 def english_option():
-    return typer.Option(False, "--english", "-e", help="Translate the spoken text to English")
+    return typer.Option(False, "--english", "-e", help="Translate to spoken text to English")
+
+def help_option():
+    return typer.Option(False, "--help", "-h", is_eager=True)
 
 def apply_english_translation(post_process: str | None) -> str | None:
     if post_process:
@@ -82,7 +85,7 @@ def main_callback(
     new: bool = new_option(),
     english: bool = english_option(),
     verbose: bool = verbose_option(),
-    help: bool = typer.Option(False, "--help", "-h", is_eager=True),
+    help: bool = help_option(),
 ):
     """
     aitranscribe: CLI tool for STT and LLM post-processing via OpenRouter.
