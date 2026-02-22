@@ -22,6 +22,7 @@ try:
         english_option,
         help_option,
         file_path_argument,
+        update_interval_option,
         apply_english_translation,
         cleanup_old_records,
         validate_api_keys,
@@ -93,6 +94,11 @@ def test_file_path_argument():
     """Test that file_path_argument returns correct typer.Argument."""
     argument = file_path_argument()
     assert isinstance(argument, typer.models.ArgumentInfo)
+
+def test_update_interval_option():
+    """Test that update_interval_option returns correct typer.Option."""
+    option = update_interval_option()
+    assert isinstance(option, typer.models.OptionInfo)
 
 
 # ==================== Logic Helper Tests ====================

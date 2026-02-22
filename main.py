@@ -40,7 +40,10 @@ def help_option():
     return typer.Option(False, "--help", "-h", is_eager=True)
 
 def file_path_argument():
-    return typer.Argument("/tmp/aitranscribe_record.mp3", help="Path to the audio or video file")
+    return typer.Argument("/tmp/aitranscribe_record.mp3", help="Path to audio or video file")
+
+def update_interval_option():
+    return typer.Option(1, help="Duration update interval in seconds")
 
 def apply_english_translation(post_process: str | None) -> str | None:
     if post_process:
@@ -280,7 +283,7 @@ def record(
     post_process: str | None = post_process_option(),
     stt_model: str = stt_model_option(),
     verbose: bool = verbose_option(),
-    update_interval: float = typer.Option(1, help="Duration update interval in seconds"),
+    update_interval: float = update_interval_option(),
 ):
     """
     Record audio from the microphone (Push-to-Talk) and transcribe it using Groq.
