@@ -19,14 +19,32 @@ from openai import OpenAI
 from core import chunk_audio, transcribe_audio, process_with_llm, compress_audio
 
 app = typer.Typer(
-    help="aitranscribe: CLI tool for STT and LLM post-processing via OpenRouter.",
+    help="aitranscribe: CLI tool for STT and LLM post-processing via OpenRouter.\n\n"
+         "Options:\n"
+         "  --install-completion    Install autocompletion for your shell\n"
+         "  --show-completion       Show autocompletion script\n"
+         "  -v, --verbose           Show verbose error outputs\n"
+         "  -n, --new               Start fresh: Delete all previous 'aitranscribe_record' files\n"
+         "  -p, --post-process      Prompt for LLM post-processing. Use without arg for default formatting\n"
+         "  -e, --english           Translate the spoken text to English\n"
+         "  -h, --help              Show this message and exit\n"
+         "\nUse 'aitranscribe <command> --help' to see options for specific commands.",
     context_settings={"help_option_names": ["-h", "--help"]}
 )
 console = Console()
 state = {"verbose": False}
 
-@app.callback()
-def main_callback(verbose: bool = typer.Option(False, "--verbose", "-v", help="Show verbose error outputs")):
+@app.callback(invoke_without_command=True)
+def main_callback(
+    ctx: typer.Context,
+    post_process: str | None = typer.Option(None, "--post-process", "-p", help="Prompt for LLM post-processing. Use without arg for default formatting"),
+    new: bool = typer.Option(False, "--new", "-n", help="Start fresh: Delete all previous 'aitranscribe_record' files"),
+    english: bool = typer.Option(False, "--english", "--englisch", "-e", help="Translate the spoken text to English"),
+    verbose: bool = typer.Option(False, "--verbose", "-v", help="Show verbose error outputs"),
+):
+    """
+    aitranscribe: CLI tool for STT and LLM post-processing via OpenRouter.
+    """
     state["verbose"] = verbose
 
 # Configuration Directory
@@ -75,10 +93,11 @@ llm_client = OpenAI(
 @app.command()
 def file(
     file_path: str = typer.Argument("/tmp/aitranscribe_record.mp3", help="Path to the audio or video file"),
-    post_process: str | None = typer.Option(None, "--post-process", "-p", help="Prompt for LLM post-processing"),
+    post_process: str | None = typer.Option(None, "--post-process", "-p", help="Prompt for LLM post-processing. Use without arg for default formatting"),
     stt_model: str = typer.Option(GROQ_STT_MODEL, help="Groq STT model to use"),
     llm_model: str = typer.Option(OPENROUTER_LLM_MODEL, help="OpenRouter LLM model to use"),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Show verbose error outputs"),
+    new: bool = typer.Option(False, "--new", "-n", help="Start fresh: Delete all previous 'aitranscribe_record' files"),
     english: bool = typer.Option(False, "--english", "--englisch", "-e", help="Translate the spoken text to English")
 ):
     """
@@ -92,6 +111,20 @@ def file(
             post_process = f"Please translate the following text to English, and also follow these instructions: {post_process}"
         else:
             post_process = "Please translate the following text to English, correct grammatical errors, remove filler words, and structure it clearly."
+
+    if new:
+        temp_dir = tempfile.gettempdir()
+        base_name = "aitranscribe_record"
+        pattern = os.path.join(temp_dir, f"{base_name}_*")
+        deleted_count = 0
+        for f in glob.glob(pattern):
+            try:
+                os.remove(f)
+                deleted_count += 1
+            except OSError as e:
+                console.print(f"[yellow]Could not delete {f}: {e}[/yellow]")
+        if deleted_count > 0:
+            console.print(f"[blue]Deleted {deleted_count} previous recording(s) in {temp_dir}[/blue]")
 
     if not stt_client:
         console.print(f"[red]Error: GROQ_API_KEY is not set or invalid in {CONFIG_FILE}.[/red]")
@@ -112,7 +145,7 @@ def file(
     # Determine the next version number for output files in temp_dir
     temp_dir = tempfile.gettempdir()
     base_name = "aitranscribe_record"
-    pattern = re.compile(rf"^{re.escape(base_name)}_v(\d+)(?:_read)?\.[a-zA-Z0-9]+$")
+    pattern = re.compile(rf"^{re.escape(base_name)}_v(\d+)(?:\.prompted)?\.[a-zA-Z0-9]+$")
     max_v = 0
     try:
         for fname in os.listdir(temp_dir):
@@ -198,12 +231,12 @@ def file(
 
 @app.command()
 def record(
-    post_process: str | None = typer.Option(None, "--post-process", "-p", help="Prompt for LLM post-processing"),
+    post_process: str | None = typer.Option(None, "--post-process", "-p", help="Prompt for LLM post-processing. Use without arg for default formatting"),
     stt_model: str = typer.Option(GROQ_STT_MODEL, help="Groq STT model to use"),
     llm_model: str = typer.Option(OPENROUTER_LLM_MODEL, help="OpenRouter LLM model to use"),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Show verbose error outputs"),
     update_interval: float = typer.Option(0.4, help="Duration update interval in seconds"),
-    new: bool = typer.Option(False, "--new", "-n", help="Delete all previous recordings in the temporary directory before starting"),
+    new: bool = typer.Option(False, "--new", "-n", help="Start fresh: Delete all previous 'aitranscribe_record' files in the temporary directory before starting"),
     english: bool = typer.Option(False, "--english", "--englisch", "-e", help="Translate the spoken text to English")
 ):
     """
@@ -339,7 +372,7 @@ def record(
     
     # Determine the next version number for output files
     base_name = "aitranscribe_record"
-    pattern = re.compile(rf"^{re.escape(base_name)}_v(\d+)(?:_read)?\.[a-zA-Z0-9]+$")
+    pattern = re.compile(rf"^{re.escape(base_name)}_v(\d+)(?:\.prompted)?\.[a-zA-Z0-9]+$")
     max_v = 0
     try:
         for fname in os.listdir(temp_dir):
@@ -430,7 +463,9 @@ if __name__ == "__main__":
                 args.insert(i + 1, "Please smooth and structure the following text, remove filler words, correct grammatical errors, but do not translate it.")
                 
     if not any(arg in ["file", "record", "--help", "-h", "--install-completion", "--show-completion"] for arg in args):
-        args.insert(0, "record")
+        # Allow the global help options to pass through cleanly
+        if not any(arg in ["--help", "-h"] for arg in args):
+            args.insert(0, "record")
         
     sys.argv[1:] = args
     app()
