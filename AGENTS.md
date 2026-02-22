@@ -23,15 +23,15 @@
   * *Scalability:* Long-term maintenance and modularity.
 * **Prohibition:** **NEVER** use surface-level logic. If the reasoning feels easy, dig deeper until the logic is irrefutable.
 
-## 3. DESIGN PHILOSOPHY: "INTENTIONAL MINIMALISM"
+## 3. ARCHITECTURE PHILOSOPHY: PROFESSIONAL MINIMALISM
 
-* **Anti-Generic:** Reject standard "bootstrapped" approaches. If it looks like a template, it is wrong.
+* **Anti-Generic:** Overthink popular approaches twice. There might be a smarter solution.
 * **Minimalism:** Reduction is the ultimate sophistication.
 
 ## 4. CODING STANDARDS
 
 * **Library Discipline (CRITICAL):** If a library is detected or active in the project, **YOU MUST USE IT**.
-  * **Do not** build custom components or algorithms from scratch if the library provides them.
+  * **Do not** build custom components or algorithms from scratch if a library provides them.
 
 * **DRY Principle (CRITICAL):** Always eliminate code duplication.
   * Extract repeated logic into reusable functions
