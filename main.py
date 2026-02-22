@@ -2,6 +2,7 @@ import sys
 import time
 import os
 import re
+import shutil
 import typer
 import sounddevice as sd
 import soundfile as sf
@@ -108,6 +109,34 @@ def file(
         console.print(f"[red]Error: File not found: {file_path}[/red]")
         raise typer.Exit(code=1)
 
+    # Determine the next version number for output files in temp_dir
+    temp_dir = tempfile.gettempdir()
+    base_name = "aitranscribe_record"
+    pattern = re.compile(rf"^{re.escape(base_name)}_v(\d+)(?:_read)?\.[a-zA-Z0-9]+$")
+    max_v = 0
+    try:
+        for fname in os.listdir(temp_dir):
+            match = pattern.match(fname)
+            if match:
+                v = int(match.group(1))
+                if v > max_v:
+                    max_v = v
+    except OSError:
+        pass
+    next_v = max_v + 1
+    
+    ext = os.path.splitext(file_path)[1]
+    if not ext:
+        ext = ".mp3"
+        
+    temp_file_path = os.path.join(temp_dir, f"{base_name}_v{next_v:02d}{ext}")
+    try:
+        shutil.copy2(file_path, temp_file_path)
+        file_path = temp_file_path
+        console.print(f"[blue]Copied file to temp location: {file_path}[/blue]")
+    except Exception as e:
+        console.print(f"[yellow]Warning: Could not copy file to temp directory: {e}[/yellow]")
+
     try:
         with Progress(
             SpinnerColumn(),
@@ -133,6 +162,11 @@ def file(
         
         console.print("\n[bold green]Transcription Complete:[/bold green]")
         console.print(final_text)
+        
+        final_txt_file = os.path.splitext(file_path)[0] + ".txt"
+        with open(final_txt_file, "w", encoding="utf-8") as f:
+            f.write(f"{final_text.strip()}\n")
+        console.print(f"[blue]Transcription saved to {final_txt_file}[/blue]")
 
         # 3. Post-Processing
         if post_process:
@@ -151,6 +185,10 @@ def file(
                 
             console.print("\n[bold green]LLM Result:[/bold green]")
             console.print(llm_result)
+            
+            with open(final_txt_file, "w", encoding="utf-8") as f:
+                f.write(f"{llm_result.strip()}\n")
+            console.print(f"[blue]Text file updated with LLM result at {final_txt_file}[/blue]")
 
     except Exception as e:
         console.print(f"[red]An error occurred: {str(e)}[/red]")
@@ -301,7 +339,7 @@ def record(
     
     # Determine the next version number for output files
     base_name = "aitranscribe_record"
-    pattern = re.compile(rf"^{re.escape(base_name)}_v(\d+)(?:_read)?\.(?:mp3|txt)$")
+    pattern = re.compile(rf"^{re.escape(base_name)}_v(\d+)(?:_read)?\.[a-zA-Z0-9]+$")
     max_v = 0
     try:
         for fname in os.listdir(temp_dir):
