@@ -102,13 +102,13 @@ llm_client = OpenAI(
 
 @app.command()
 def file(
+    english: bool = typer.Option(False, "--english", "-e", help="Translate the spoken text to English"),
     file_path: str = typer.Argument("/tmp/aitranscribe_record.mp3", help="Path to the audio or video file"),
+    llm_model: str = typer.Option(OPENROUTER_LLM_MODEL, "--llm-model", "-l", help="OpenRouter LLM model to use"),
+    new: bool = typer.Option(False, "--new", "-n", help="rm /tmp/aitranscribe_record* before starting"),
     post_process: str | None = typer.Option(None, "--post-process", "-p", help="Prompt for LLM post-processing. Use without arg for default formatting"),
     stt_model: str = typer.Option(GROQ_STT_MODEL, help="Groq STT model to use"),
-    llm_model: str = typer.Option(OPENROUTER_LLM_MODEL, help="OpenRouter LLM model to use"),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Show verbose error outputs"),
-    new: bool = typer.Option(False, "--new", "-n", help="Start fresh: Delete all previous 'aitranscribe_record' files"),
-    english: bool = typer.Option(False, "--english", "--englisch", "-e", help="Translate the spoken text to English")
 ):
     """
     Transcribe a local audio or video file using Groq STT and optionally process with OpenRouter LLM.
@@ -241,13 +241,13 @@ def file(
 
 @app.command()
 def record(
+    english: bool = typer.Option(False, "--english", "-e", help="Translate the spoken text to English"),
+    llm_model: str = typer.Option(OPENROUTER_LLM_MODEL, "--llm-model", "-l", help="OpenRouter LLM model to use"),
+    new: bool = typer.Option(False, "--new", "-n", help="rm /tmp/aitranscribe_record* before starting"),
     post_process: str | None = typer.Option(None, "--post-process", "-p", help="Prompt for LLM post-processing. Use without arg for default formatting"),
     stt_model: str = typer.Option(GROQ_STT_MODEL, help="Groq STT model to use"),
-    llm_model: str = typer.Option(OPENROUTER_LLM_MODEL, help="OpenRouter LLM model to use"),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Show verbose error outputs"),
     update_interval: float = typer.Option(1, help="Duration update interval in seconds"),
-    new: bool = typer.Option(False, "--new", "-n", help="Start fresh: Delete all previous 'aitranscribe_record' files in the temporary directory before starting"),
-    english: bool = typer.Option(False, "--english", "--englisch", "-e", help="Translate the spoken text to English")
 ):
     """
     Record audio from the microphone (Push-to-Talk) and transcribe it using Groq.
