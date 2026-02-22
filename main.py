@@ -384,6 +384,15 @@ def record(
 
 if __name__ == "__main__":
     args = sys.argv[1:]
+    
+    # Pre-process arguments to handle `-p` without argument
+    for i, arg in enumerate(args):
+        if arg == "-p" or arg == "--post-process":
+            if i + 1 == len(args) or args[i + 1].startswith("-"):
+                args.insert(i + 1, "Bitte glätte und strukturiere den folgenden Text, entferne Füllwörter, korrigiere grammatikalische Fehler, aber übersetze ihn nicht.")
+                
     if not any(arg in ["file", "record", "--help", "-h", "--install-completion", "--show-completion"] for arg in args):
-        sys.argv.insert(1, "record")
+        args.insert(0, "record")
+        
+    sys.argv[1:] = args
     app()
