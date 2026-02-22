@@ -61,7 +61,12 @@ def transcribe_audio(client: OpenAI, file_path: str, stt_model: str) -> str:
 
 def process_with_llm(client: OpenAI, text: str, prompt: str, llm_model: str) -> str:
     """Sends the transcribed text to an LLM for post-processing."""
-    system_prompt = "You are a helpful assistant analyzing an audio transcription."
+    system_prompt = (
+        "You are a helpful assistant analyzing an audio transcription. "
+        "IMPORTANT: Output ONLY the requested processed text. "
+        "Do not include any introductory remarks, explanations, "
+        "or concluding comments (like 'Here is the translation' or 'Here is the processed text')."
+    )
     if prompt:
         system_prompt += f"\nUser Request: {prompt}"
         

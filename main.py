@@ -358,7 +358,7 @@ def record(
         # Write transcription to a text file next to the mp3
         final_txt_file = final_mp3_file.replace(".mp3", ".txt") if final_mp3_file.endswith(".mp3") else final_mp3_file + ".txt"
         with open(final_txt_file, "w", encoding="utf-8") as f:
-            f.write(transcript)
+            f.write(f"{transcript.strip()}\n")
         console.print(f"[blue]Transcription saved to {final_txt_file}[/blue]")
 
         # Post-Processing
@@ -378,6 +378,11 @@ def record(
                 
             console.print("\n[bold green]LLM Result:[/bold green]")
             console.print(llm_result)
+            
+            # Write the LLM result to the text file instead of the raw transcript
+            with open(final_txt_file, "w", encoding="utf-8") as f:
+                f.write(f"{llm_result.strip()}\n")
+            console.print(f"[blue]Text file updated with LLM result at {final_txt_file}[/blue]")
 
     except Exception as e:
         console.print(f"[red]An error occurred: {str(e)}[/red]")
