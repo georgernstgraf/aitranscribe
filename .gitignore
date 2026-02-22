@@ -1,1 +1,4 @@
-venv/\n__pycache__/\n.pytest_cache/\n.tox/
+venv/
+__pycache__/
+.pytest_cache/
+.tox/
