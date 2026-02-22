@@ -271,7 +271,7 @@ def record(
     
     # Determine the next version number for output files
     base_name = "aitranscribe_record"
-    pattern = re.compile(rf"^{re.escape(base_name)}_v(\d+)\.(?:mp3|txt)$")
+    pattern = re.compile(rf"^{re.escape(base_name)}_v(\d+)(?:_read)?\.(?:mp3|txt)$")
     max_v = 0
     try:
         for fname in os.listdir(temp_dir):
