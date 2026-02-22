@@ -1,12 +1,12 @@
 # aitranscribe
 
-A powerful CLI tool for audio transcription and LLM post-processing, powered entirely by OpenRouter's API.
+A powerful CLI tool for audio transcription and LLM post-processing, powered by **Groq** for lightning-fast STT and **OpenRouter** for LLM post-processing.
 
 ## 🚀 Features
 
-*   **📁 File Transcription:** Process local audio and video files (`.mp3`, `.wav`, `.mp4`, `.m4a`, etc.).
+*   **📁 File Transcription:** Process local audio and video files (`.mp3`, `.wav`, `.mp4`, `.m4a`, etc.) using Groq's whisper models.
 *   **🎙️ Microphone Recording:** Capture audio directly from your terminal and transcribe it on the fly.
-*   **✂️ Auto-Chunking:** Automatically splits large audio files to bypass standard API file size limits.
+*   **✂️ Auto-Chunking:** Automatically splits large audio files to bypass standard API file size limits (Groq currently limits audio files to 25MB).
 *   **✨ LLM Post-Processing:** Feed your transcriptions back into an OpenRouter LLM for summarization, formatting, or action-item extraction.
 
 ## 🛠️ Technology Stack
@@ -64,10 +64,11 @@ On the first run, the tool will automatically create a configuration template at
    ```bash
    nano ~/.config/aitranscribe/config
    ```
-2. Add your OpenRouter API key and customize the default models if desired:
+2. Add your Groq API key for STT and OpenRouter API key for LLM processing:
    ```env
+   GROQ_API_KEY="your_groq_api_key_here"
    OPENROUTER_API_KEY="your_openrouter_api_key_here"
-   OPENROUTER_STT_MODEL="openai/whisper-large-v3"
+   GROQ_STT_MODEL="whisper-large-v3-turbo"
    OPENROUTER_LLM_MODEL="anthropic/claude-3-haiku"
    ```
 

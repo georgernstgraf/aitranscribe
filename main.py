@@ -25,25 +25,40 @@ CONFIG_DIR = Path.home() / ".config" / "aitranscribe"
 CONFIG_FILE = CONFIG_DIR / "config"
 
 # Create default config if it doesn't exist
-if not CONFIG_FILE.exists():
+if not CONFIG_FILE.exists() or "GROQ_API_KEY" not in CONFIG_FILE.read_text():
     CONFIG_DIR.mkdir(parents=True, exist_ok=True)
-    with open(CONFIG_FILE, "w") as f:
-        f.write('OPENROUTER_API_KEY="your_openrouter_api_key_here"\n')
-        f.write('OPENROUTER_STT_MODEL="openai/whisper-large-v3"\n')
-        f.write('OPENROUTER_LLM_MODEL="anthropic/claude-3-haiku"\n')
-    console.print(f"[yellow]Created default configuration at {CONFIG_FILE}[/yellow]")
-    console.print("[yellow]Please edit this file to add your OPENROUTER_API_KEY before running the tool.[/yellow]")
+    # If file exists but is missing Groq keys (migration), append them
+    mode = "a" if CONFIG_FILE.exists() else "w"
+    with open(CONFIG_FILE, mode) as f:
+        if mode == "w":
+            f.write('GROQ_API_KEY="your_groq_api_key_here"\n')
+            f.write('OPENROUTER_API_KEY="your_openrouter_api_key_here"\n')
+        else:
+            f.write('\n# Added during Groq migration\n')
+            f.write('GROQ_API_KEY="your_groq_api_key_here"\n')
+        f.write('GROQ_STT_MODEL="whisper-large-v3-turbo"\n')
+        if mode == "w":
+            f.write('OPENROUTER_LLM_MODEL="anthropic/claude-3-haiku"\n')
+    console.print(f"[yellow]Updated/Created configuration at {CONFIG_FILE}[/yellow]")
+    console.print("[yellow]Please edit this file to add your API keys before running the tool.[/yellow]")
 
 # Load environment variables from global config
 load_dotenv(dotenv_path=CONFIG_FILE)
 
-# OpenRouter client configuration
+# API Keys and Models
+GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
-OPENROUTER_STT_MODEL = os.getenv("OPENROUTER_STT_MODEL", "openai/whisper-large-v3")
+GROQ_STT_MODEL = os.getenv("GROQ_STT_MODEL", "whisper-large-v3-turbo")
 OPENROUTER_LLM_MODEL = os.getenv("OPENROUTER_LLM_MODEL", "anthropic/claude-3-haiku")
 
-# Initialize OpenAI client pointing to OpenRouter
-client = OpenAI(
+# Initialize OpenAI client pointing to Groq for STT
+stt_client = OpenAI(
+    base_url="https://api.groq.com/openai/v1",
+    api_key=GROQ_API_KEY,
+) if GROQ_API_KEY and GROQ_API_KEY != "your_groq_api_key_here" else None
+
+# Initialize OpenAI client pointing to OpenRouter for LLM
+llm_client = OpenAI(
     base_url="https://openrouter.ai/api/v1",
     api_key=OPENROUTER_API_KEY,
 ) if OPENROUTER_API_KEY and OPENROUTER_API_KEY != "your_openrouter_api_key_here" else None
@@ -52,18 +67,22 @@ client = OpenAI(
 def file(
     file_path: str = typer.Argument(..., help="Path to the audio or video file"),
     post_process: str = typer.Option(None, "--post-process", help="Prompt for LLM post-processing"),
-    stt_model: str = typer.Option(OPENROUTER_STT_MODEL, help="OpenRouter STT model to use"),
+    stt_model: str = typer.Option(GROQ_STT_MODEL, help="Groq STT model to use"),
     llm_model: str = typer.Option(OPENROUTER_LLM_MODEL, help="OpenRouter LLM model to use"),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Show verbose error outputs")
 ):
     """
-    Transcribe a local audio or video file.
+    Transcribe a local audio or video file using Groq STT and optionally process with OpenRouter LLM.
     """
     if verbose:
         state["verbose"] = True
 
-    if not client:
-        console.print(f"[red]Error: OPENROUTER_API_KEY is not set or invalid in {CONFIG_FILE}.[/red]")
+    if not stt_client:
+        console.print(f"[red]Error: GROQ_API_KEY is not set or invalid in {CONFIG_FILE}.[/red]")
+        raise typer.Exit(code=1)
+        
+    if post_process and not llm_client:
+        console.print(f"[red]Error: OPENROUTER_API_KEY is not set but needed for post-processing.[/red]")
         raise typer.Exit(code=1)
         
     console.print(f"[blue]Preparing to transcribe file: {file_path}[/blue]")
@@ -87,7 +106,7 @@ def file(
             full_transcript = []
             for i, chunk_path in enumerate(chunks):
                 progress.update(progress.task_ids[0], description=f"Transcribing chunk {i+1}/{len(chunks)}...")
-                transcript = transcribe_audio(client, chunk_path, stt_model)
+                transcript = transcribe_audio(stt_client, chunk_path, stt_model)
                 full_transcript.append(transcript)
                 
                 # Cleanup chunks if they were created
@@ -111,7 +130,7 @@ def file(
                 transient=True,
             ) as progress:
                 progress.add_task(description="Processing with LLM...", total=None)
-                llm_result = process_with_llm(client, final_text, post_process, llm_model)
+                llm_result = process_with_llm(llm_client, final_text, post_process, llm_model)
                 
             console.print("\n[bold green]LLM Result:[/bold green]")
             console.print(llm_result)
@@ -125,19 +144,23 @@ def file(
 @app.command()
 def record(
     post_process: str = typer.Option(None, "--post-process", help="Prompt for LLM post-processing"),
-    stt_model: str = typer.Option(OPENROUTER_STT_MODEL, help="OpenRouter STT model to use"),
+    stt_model: str = typer.Option(GROQ_STT_MODEL, help="Groq STT model to use"),
     llm_model: str = typer.Option(OPENROUTER_LLM_MODEL, help="OpenRouter LLM model to use"),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Show verbose error outputs")
 ):
     """
-    Record audio from the microphone (Push-to-Talk) and transcribe it.
+    Record audio from the microphone (Push-to-Talk) and transcribe it using Groq.
     Hold SPACEBAR to record.
     """
     if verbose:
         state["verbose"] = True
 
-    if not client:
-        console.print(f"[red]Error: OPENROUTER_API_KEY is not set or invalid in {CONFIG_FILE}.[/red]")
+    if not stt_client:
+        console.print(f"[red]Error: GROQ_API_KEY is not set or invalid in {CONFIG_FILE}.[/red]")
+        raise typer.Exit(code=1)
+        
+    if post_process and not llm_client:
+        console.print(f"[red]Error: OPENROUTER_API_KEY is not set but needed for post-processing.[/red]")
         raise typer.Exit(code=1)
         
     samplerate = 44100
@@ -197,7 +220,7 @@ def record(
             transient=True,
         ) as progress:
             progress.add_task(description="Transcribing audio...", total=None)
-            transcript = transcribe_audio(client, temp_file, stt_model)
+            transcript = transcribe_audio(stt_client, temp_file, stt_model)
         
         console.print("\n[bold green]Transcription Complete:[/bold green]")
         console.print(transcript)
@@ -214,7 +237,7 @@ def record(
                 transient=True,
             ) as progress:
                 progress.add_task(description="Processing with LLM...", total=None)
-                llm_result = process_with_llm(client, transcript, post_process, llm_model)
+                llm_result = process_with_llm(llm_client, transcript, post_process, llm_model)
                 
             console.print("\n[bold green]LLM Result:[/bold green]")
             console.print(llm_result)
