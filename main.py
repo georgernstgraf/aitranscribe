@@ -14,6 +14,11 @@ from core import chunk_audio, transcribe_audio, process_with_llm
 
 app = typer.Typer(help="aitranscribe: CLI tool for STT and LLM post-processing via OpenRouter.")
 console = Console()
+state = {"verbose": False}
+
+@app.callback()
+def main_callback(verbose: bool = typer.Option(False, "--verbose", "-v", help="Show verbose error outputs")):
+    state["verbose"] = verbose
 
 # Configuration Directory
 CONFIG_DIR = Path.home() / ".config" / "aitranscribe"
@@ -48,11 +53,15 @@ def file(
     file_path: str = typer.Argument(..., help="Path to the audio or video file"),
     post_process: str = typer.Option(None, "--post-process", help="Prompt for LLM post-processing"),
     stt_model: str = typer.Option(OPENROUTER_STT_MODEL, help="OpenRouter STT model to use"),
-    llm_model: str = typer.Option(OPENROUTER_LLM_MODEL, help="OpenRouter LLM model to use")
+    llm_model: str = typer.Option(OPENROUTER_LLM_MODEL, help="OpenRouter LLM model to use"),
+    verbose: bool = typer.Option(False, "--verbose", "-v", help="Show verbose error outputs")
 ):
     """
     Transcribe a local audio or video file.
     """
+    if verbose:
+        state["verbose"] = True
+
     if not client:
         console.print(f"[red]Error: OPENROUTER_API_KEY is not set or invalid in {CONFIG_FILE}.[/red]")
         raise typer.Exit(code=1)
@@ -109,18 +118,24 @@ def file(
 
     except Exception as e:
         console.print(f"[red]An error occurred: {str(e)}[/red]")
+        if state["verbose"]:
+            console.print_exception()
         raise typer.Exit(code=1)
 
 @app.command()
 def record(
     post_process: str = typer.Option(None, "--post-process", help="Prompt for LLM post-processing"),
     stt_model: str = typer.Option(OPENROUTER_STT_MODEL, help="OpenRouter STT model to use"),
-    llm_model: str = typer.Option(OPENROUTER_LLM_MODEL, help="OpenRouter LLM model to use")
+    llm_model: str = typer.Option(OPENROUTER_LLM_MODEL, help="OpenRouter LLM model to use"),
+    verbose: bool = typer.Option(False, "--verbose", "-v", help="Show verbose error outputs")
 ):
     """
     Record audio from the microphone (Push-to-Talk) and transcribe it.
     Hold SPACEBAR to record.
     """
+    if verbose:
+        state["verbose"] = True
+
     if not client:
         console.print(f"[red]Error: OPENROUTER_API_KEY is not set or invalid in {CONFIG_FILE}.[/red]")
         raise typer.Exit(code=1)
@@ -206,8 +221,12 @@ def record(
 
     except Exception as e:
         console.print(f"[red]An error occurred: {str(e)}[/red]")
-    finally:
-        # Cleanup temporary file
+        if state["verbose"]:
+            console.print_exception()
+        # Keep the file on disk if there is an error
+        console.print(f"[yellow]Retaining recorded file for debugging: {temp_file}[/yellow]")
+    else:
+        # Cleanup temporary file only on success
         if os.path.exists(temp_file):
             os.remove(temp_file)
 
