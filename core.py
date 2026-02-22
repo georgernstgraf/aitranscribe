@@ -57,7 +57,7 @@ def transcribe_audio(client: OpenAI, file_path: str, stt_model: str) -> str:
             file=audio_file,
             response_format="text"
         )
-    return transcript
+    return str(transcript).strip()
 
 def process_with_llm(client: OpenAI, text: str, prompt: str, llm_model: str) -> str:
     """Sends the transcribed text to an LLM for post-processing."""
@@ -72,4 +72,5 @@ def process_with_llm(client: OpenAI, text: str, prompt: str, llm_model: str) -> 
             {"role": "user", "content": f"Here is the transcription:\n\n{text}"}
         ]
     )
-    return response.choices[0].message.content
+    content = response.choices[0].message.content
+    return content.strip() if content else ""

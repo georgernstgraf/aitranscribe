@@ -120,7 +120,7 @@ def file(
                 if chunk_path != file_path:
                     os.remove(chunk_path)
 
-            final_text = " ".join(full_transcript)
+            final_text = " ".join(t for t in full_transcript if t).strip()
         
         console.print("\n[bold green]Transcription Complete:[/bold green]")
         console.print(final_text)
@@ -137,6 +137,7 @@ def file(
                 transient=True,
             ) as progress:
                 progress.add_task(description="Processing with LLM...", total=None)
+                assert llm_client is not None
                 llm_result = process_with_llm(llm_client, final_text, post_process, llm_model)
                 
             console.print("\n[bold green]LLM Result:[/bold green]")
@@ -311,6 +312,7 @@ def record(
                 transient=True,
             ) as progress:
                 progress.add_task(description="Processing with LLM...", total=None)
+                assert llm_client is not None
                 llm_result = process_with_llm(llm_client, transcript, post_process, llm_model)
                 
             console.print("\n[bold green]LLM Result:[/bold green]")
