@@ -78,10 +78,10 @@ state = {"verbose": False}
 @app.callback(invoke_without_command=True)
 def main_callback(
     ctx: typer.Context,
-    post_process: str | None = typer.Option(None, "--post-process", "-p", help="Prompt for LLM post-processing. Use without arg for default formatting"),
-    new: bool = typer.Option(False, "--new", "-n", help="Start fresh: Delete all previous 'aitranscribe_record' files"),
-    english: bool = typer.Option(False, "--english", "--englisch", "-e", help="Translate the spoken text to English"),
-    verbose: bool = typer.Option(False, "--verbose", "-v", help="Show verbose error outputs"),
+    post_process: str | None = post_process_option(),
+    new: bool = new_option(),
+    english: bool = english_option(),
+    verbose: bool = verbose_option(),
     help: bool = typer.Option(False, "--help", "-h", is_eager=True),
 ):
     """
