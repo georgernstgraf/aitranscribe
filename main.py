@@ -6,15 +6,19 @@ import sounddevice as sd
 import soundfile as sf
 import numpy as np
 import tempfile
+import subprocess
 from pathlib import Path
 from rich.console import Console
 from rich.progress import Progress, SpinnerColumn, TextColumn
 from dotenv import load_dotenv
 from pynput import keyboard
 from openai import OpenAI
-from core import chunk_audio, transcribe_audio, process_with_llm
+from core import chunk_audio, transcribe_audio, process_with_llm, compress_audio
 
-app = typer.Typer(help="aitranscribe: CLI tool for STT and LLM post-processing via OpenRouter.")
+app = typer.Typer(
+    help="aitranscribe: CLI tool for STT and LLM post-processing via OpenRouter.",
+    context_settings={"help_option_names": ["-h", "--help"]}
+)
 console = Console()
 state = {"verbose": False}
 
@@ -67,7 +71,7 @@ llm_client = OpenAI(
 
 @app.command()
 def file(
-    file_path: str = typer.Argument(..., help="Path to the audio or video file"),
+    file_path: str = typer.Argument("/tmp/aitranscribe_record.wav", help="Path to the audio or video file"),
     post_process: str = typer.Option(None, "--post-process", help="Prompt for LLM post-processing"),
     stt_model: str = typer.Option(GROQ_STT_MODEL, help="Groq STT model to use"),
     llm_model: str = typer.Option(OPENROUTER_LLM_MODEL, help="OpenRouter LLM model to use"),
@@ -89,6 +93,7 @@ def file(
         
     console.print(f"[blue]Preparing to transcribe file: {file_path}[/blue]")
     console.print(f"STT Model: [cyan]{stt_model}[/cyan]")
+    console.print(f"LLM Model: [cyan]{llm_model}[/cyan]")
     
     if not os.path.exists(file_path):
         console.print(f"[red]Error: File not found: {file_path}[/red]")
@@ -173,22 +178,25 @@ def record(
     is_recording = False
     stop_event = False
 
-    def on_press(key):
+    def on_press(key) -> None:
         nonlocal is_recording, stop_event
         if key == keyboard.Key.space and not is_recording:
             is_recording = True
         elif key == keyboard.Key.esc:
             stop_event = True
+            return False  # type: ignore
 
-    def on_release(key):
+    def on_release(key) -> None:
         nonlocal is_recording, stop_event
         if key == keyboard.Key.space and is_recording:
             is_recording = False
             stop_event = True
             console.print("\n[yellow]⏹ Recording stopped.[/yellow]")
+            return False  # type: ignore
 
     console.print("[bold]Push-to-Talk Recording[/bold]")
     console.print(f"STT Model: [cyan]{stt_model}[/cyan]")
+    console.print(f"LLM Model: [cyan]{llm_model}[/cyan]")
     console.print("Press and hold [bold cyan]SPACEBAR[/bold cyan] to record. Release to transcribe. Press ESC to cancel.")
 
     # Try to disable terminal echo for cleaner UI
@@ -269,8 +277,12 @@ def record(
             TextColumn("[progress.description]{task.description}"),
             transient=True,
         ) as progress:
+            # First, compress the WAV to MP3 to save bandwidth and potentially tokens
+            progress.add_task(description="Compressing audio...", total=None)
+            compressed_file = compress_audio(temp_file)
+            
             progress.add_task(description="Transcribing audio...", total=None)
-            transcript = transcribe_audio(stt_client, temp_file, stt_model)
+            transcript = transcribe_audio(stt_client, compressed_file, stt_model)
         
         console.print("\n[bold green]Transcription Complete:[/bold green]")
         console.print(transcript)
@@ -299,9 +311,14 @@ def record(
         # Keep the file on disk if there is an error
         console.print(f"[yellow]Retaining recorded file for debugging: {temp_file}[/yellow]")
     else:
-        # Cleanup temporary file only on success
+        # Cleanup temporary files only on success
         if os.path.exists(temp_file):
             os.remove(temp_file)
+        if 'compressed_file' in locals() and os.path.exists(compressed_file):
+            os.remove(compressed_file)
 
 if __name__ == "__main__":
+    args = sys.argv[1:]
+    if not any(arg in ["file", "record", "--help", "-h", "--install-completion", "--show-completion"] for arg in args):
+        sys.argv.insert(1, "record")
     app()
