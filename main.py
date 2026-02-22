@@ -20,7 +20,7 @@ from core import chunk_audio, transcribe_audio, process_with_llm, compress_audio
 
 app = typer.Typer(
     help="aitranscribe: CLI tool for STT and LLM post-processing via OpenRouter.",
-    context_settings={"help_option_names": []},
+    context_settings={"help_option_names": ["-h", "--help"]},
     add_completion=False,
     rich_markup_mode=None,
     no_args_is_help=False,
@@ -35,14 +35,25 @@ def main_callback(
     new: bool = typer.Option(False, "--new", "-n", help="Start fresh: Delete all previous 'aitranscribe_record' files"),
     english: bool = typer.Option(False, "--english", "--englisch", "-e", help="Translate the spoken text to English"),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Show verbose error outputs"),
+    help: bool = typer.Option(False, "--help", "-h", is_eager=True),
 ):
     """
     aitranscribe: CLI tool for STT and LLM post-processing via OpenRouter.
     """
-    if ctx.invoked_subcommand is None:
+    if help:
+        typer.echo(ctx.get_help())
         typer.echo()
         typer.echo("Use 'aitranscribe <command> --help' to see options for specific commands.")
         raise typer.Exit()
+    
+    if ctx.invoked_subcommand is None:
+        typer.echo(ctx.get_help())
+        typer.echo()
+        typer.echo("Use 'aitranscribe <command> --help' to see options for specific commands.")
+        raise typer.Exit()
+    
+    if ctx.resilient_parsing:
+        return
     
     state["verbose"] = verbose
 
@@ -456,10 +467,28 @@ if __name__ == "__main__":
     args = sys.argv[1:]
     
     # Pre-process arguments to handle `-p` without argument
-    for i, arg in enumerate(args):
+    # Also handle combined short options like `-vp`
+    i = 0
+    while i < len(args):
+        arg = args[i]
+        
+        # Handle combined short options (e.g., -vp, -pv, -vpe)
+        if arg.startswith("-") and not arg.startswith("--") and len(arg) > 2:
+            # Split combined options
+            for j in range(1, len(arg)):
+                args.insert(i + j, f"-{arg[j]}")
+            del args[i]
+            # Re-process from the current position
+            continue
+        
+        # Check for -p or --post-process without argument
         if arg == "-p" or arg == "--post-process":
             if i + 1 == len(args) or args[i + 1].startswith("-"):
                 args.insert(i + 1, "Please smooth and structure the following text, remove filler words, correct grammatical errors, but do not translate it.")
+                i += 2
+                continue
+        
+        i += 1
                 
     if not any(arg in ["file", "record", "--help", "-h", "--install-completion", "--show-completion"] for arg in args):
         # Allow the global help options to pass through cleanly

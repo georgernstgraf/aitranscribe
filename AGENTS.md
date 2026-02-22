@@ -48,4 +48,4 @@
 
 ## 6. IMPORTANT NOTES
 
-* **Testing main.py:** When running `main.py` without parameters (for testing purposes), you need to press ESC to stop the recording process.
+* **Testing main.py:** When running `main.py` without command or with `record` command (for testing purposes), you need to press ESC to stop the recording process.
