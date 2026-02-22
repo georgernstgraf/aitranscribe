@@ -1,6 +1,7 @@
 import sys
 import time
 import os
+import re
 import typer
 import sounddevice as sd
 import soundfile as sf
@@ -267,8 +268,24 @@ def record(
     
     # Save to temp file
     temp_dir = tempfile.gettempdir()
+    
+    # Determine the next version number for output files
+    base_name = "aitranscribe_record"
+    pattern = re.compile(rf"^{re.escape(base_name)}_v(\d+)\.(?:mp3|txt)$")
+    max_v = 0
+    try:
+        for fname in os.listdir(temp_dir):
+            match = pattern.match(fname)
+            if match:
+                v = int(match.group(1))
+                if v > max_v:
+                    max_v = v
+    except OSError:
+        pass
+    next_v = max_v + 1
+    
     raw_wav_file = os.path.join(temp_dir, ".aitranscribe_raw.wav")
-    final_mp3_file = os.path.join(temp_dir, "aitranscribe_record.mp3")
+    final_mp3_file = os.path.join(temp_dir, f"{base_name}_v{next_v:02d}.mp3")
     
     sf.write(raw_wav_file, audio_np, samplerate)
     
