@@ -71,7 +71,7 @@ llm_client = OpenAI(
 
 @app.command()
 def file(
-    file_path: str = typer.Argument("/tmp/aitranscribe_record.wav", help="Path to the audio or video file"),
+    file_path: str = typer.Argument("/tmp/aitranscribe_record.mp3", help="Path to the audio or video file"),
     post_process: str = typer.Option(None, "--post-process", help="Prompt for LLM post-processing"),
     stt_model: str = typer.Option(GROQ_STT_MODEL, help="Groq STT model to use"),
     llm_model: str = typer.Option(OPENROUTER_LLM_MODEL, help="OpenRouter LLM model to use"),
@@ -266,10 +266,10 @@ def record(
     
     # Save to temp file
     temp_dir = tempfile.gettempdir()
-    temp_file = os.path.join(temp_dir, "aitranscribe_record.wav")
-    sf.write(temp_file, audio_np, samplerate)
+    raw_wav_file = os.path.join(temp_dir, ".aitranscribe_raw.wav")
+    final_mp3_file = os.path.join(temp_dir, "aitranscribe_record.mp3")
     
-    console.print(f"[blue]Audio saved temporarily to {temp_file}[/blue]")
+    sf.write(raw_wav_file, audio_np, samplerate)
     
     try:
         with Progress(
@@ -279,13 +279,25 @@ def record(
         ) as progress:
             # First, compress the WAV to MP3 to save bandwidth and potentially tokens
             progress.add_task(description="Compressing audio...", total=None)
-            compressed_file = compress_audio(temp_file)
+            compress_audio(raw_wav_file, output_path=final_mp3_file)
+            
+            # Clean up the raw wav now that we have the mp3
+            if os.path.exists(raw_wav_file):
+                os.remove(raw_wav_file)
+
+            console.print(f"[blue]Audio saved to {final_mp3_file}[/blue]")
             
             progress.add_task(description="Transcribing audio...", total=None)
-            transcript = transcribe_audio(stt_client, compressed_file, stt_model)
+            transcript = transcribe_audio(stt_client, final_mp3_file, stt_model)
         
         console.print("\n[bold green]Transcription Complete:[/bold green]")
         console.print(transcript)
+        
+        # Write transcription to a text file next to the mp3
+        final_txt_file = final_mp3_file.replace(".mp3", ".txt") if final_mp3_file.endswith(".mp3") else final_mp3_file + ".txt"
+        with open(final_txt_file, "w", encoding="utf-8") as f:
+            f.write(transcript)
+        console.print(f"[blue]Transcription saved to {final_txt_file}[/blue]")
 
         # Post-Processing
         if post_process:
@@ -309,13 +321,12 @@ def record(
         if state["verbose"]:
             console.print_exception()
         # Keep the file on disk if there is an error
-        console.print(f"[yellow]Retaining recorded file for debugging: {temp_file}[/yellow]")
+        console.print(f"[yellow]Retaining recorded file for debugging: {final_mp3_file}[/yellow]")
     else:
-        # Cleanup temporary files only on success
-        if os.path.exists(temp_file):
-            os.remove(temp_file)
-        if 'compressed_file' in locals() and os.path.exists(compressed_file):
-            os.remove(compressed_file)
+        # We now keep the final mp3 file on disk for reuse, as requested
+        # We only clean up the raw uncompressed wav file
+        if os.path.exists(raw_wav_file):
+            os.remove(raw_wav_file)
 
 if __name__ == "__main__":
     args = sys.argv[1:]

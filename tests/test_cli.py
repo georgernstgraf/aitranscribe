@@ -23,9 +23,9 @@ def test_cli_help():
     assert "record" in result.stdout
 
 def test_cli_file_missing_arg():
-    """Test that the file command defaults to /tmp/aitranscribe_record.wav."""
+    """Test that the file command defaults to /tmp/aitranscribe_record.mp3."""
     result = runner.invoke(app, ["file"])
     # Should fail because the default file does not exist in testing
     assert result.exit_code != 0
     assert "File not found" in result.stdout
-    assert "/tmp/aitranscribe_record.wav" in result.stdout
+    assert "/tmp/aitranscribe_record.mp3" in result.stdout

@@ -8,19 +8,20 @@ def get_audio_duration(file_path: str) -> float:
     audio = AudioSegment.from_file(file_path)
     return len(audio) / 1000.0
 
-def compress_audio(file_path: str) -> str:
+def compress_audio(file_path: str, output_path: str | None = None) -> str:
     """
     Compresses the audio file (e.g. WAV) to a highly compressed MP3 format
     to save API tokens/bandwidth. Returns the path to the compressed file.
     """
     audio = AudioSegment.from_file(file_path)
-    file_name = Path(file_path).stem
-    output_dir = Path(file_path).parent
-    compressed_path = output_dir / f"{file_name}_compressed.mp3"
+    if output_path is None:
+        file_name = Path(file_path).stem
+        output_dir = Path(file_path).parent
+        output_path = str(output_dir / f"{file_name}_compressed.mp3")
     
     # Export as mp3 at a low bitrate suitable for speech (e.g., 64k or 32k)
-    audio.export(str(compressed_path), format="mp3", bitrate="32k")
-    return str(compressed_path)
+    audio.export(output_path, format="mp3", bitrate="32k")
+    return output_path
 
 def chunk_audio(file_path: str, max_size_mb: int = 25) -> list[str]:
     """

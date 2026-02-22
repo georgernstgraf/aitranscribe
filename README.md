@@ -88,7 +88,7 @@ aitranscribe file path/to/audio.mp3
 
 **Transcribe previous recording:**
 ```bash
-# Running "file" without arguments defaults to /tmp/aitranscribe_record.wav
+# Running "file" without arguments defaults to /tmp/aitranscribe_record.mp3
 aitranscribe file
 ```
 
