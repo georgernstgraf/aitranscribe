@@ -19,17 +19,11 @@ from openai import OpenAI
 from core import chunk_audio, transcribe_audio, process_with_llm, compress_audio
 
 app = typer.Typer(
-    help="aitranscribe: CLI tool for STT and LLM post-processing via OpenRouter.\n\n"
-         "Options:\n"
-         "  --install-completion    Install autocompletion for your shell\n"
-         "  --show-completion       Show autocompletion script\n"
-         "  -v, --verbose           Show verbose error outputs\n"
-         "  -n, --new               Start fresh: Delete all previous 'aitranscribe_record' files\n"
-         "  -p, --post-process      Prompt for LLM post-processing. Use without arg for default formatting\n"
-         "  -e, --english           Translate the spoken text to English\n"
-         "  -h, --help              Show this message and exit\n"
-         "\nUse 'aitranscribe <command> --help' to see options for specific commands.",
-    context_settings={"help_option_names": ["-h", "--help"]}
+    help="aitranscribe: CLI tool for STT and LLM post-processing via OpenRouter.",
+    context_settings={"help_option_names": []},
+    add_completion=False,
+    rich_markup_mode=None,
+    no_args_is_help=False,
 )
 console = Console()
 state = {"verbose": False}
@@ -45,6 +39,11 @@ def main_callback(
     """
     aitranscribe: CLI tool for STT and LLM post-processing via OpenRouter.
     """
+    if ctx.invoked_subcommand is None:
+        typer.echo()
+        typer.echo("Use 'aitranscribe <command> --help' to see options for specific commands.")
+        raise typer.Exit()
+    
     state["verbose"] = verbose
 
 # Configuration Directory
@@ -235,7 +234,7 @@ def record(
     stt_model: str = typer.Option(GROQ_STT_MODEL, help="Groq STT model to use"),
     llm_model: str = typer.Option(OPENROUTER_LLM_MODEL, help="OpenRouter LLM model to use"),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Show verbose error outputs"),
-    update_interval: float = typer.Option(0.4, help="Duration update interval in seconds"),
+    update_interval: float = typer.Option(1, help="Duration update interval in seconds"),
     new: bool = typer.Option(False, "--new", "-n", help="Start fresh: Delete all previous 'aitranscribe_record' files in the temporary directory before starting"),
     english: bool = typer.Option(False, "--english", "--englisch", "-e", help="Translate the spoken text to English")
 ):

@@ -45,3 +45,7 @@
 1. **Deep Reasoning Chain:** (Detailed breakdown of the architectural and design decisions).
 2. **Edge Case Analysis:** (What could go wrong and how we prevented it).
 3. **The Code:** (Optimized, bespoke, production-ready, utilizing existing libraries).
+
+## 6. IMPORTANT NOTES
+
+* **Testing main.py:** When running `main.py` without parameters (for testing purposes), you need to press ESC to stop the recording process.
