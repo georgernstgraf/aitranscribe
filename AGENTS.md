@@ -33,6 +33,17 @@
 * **Library Discipline (CRITICAL):** If a library is detected or active in the project, **YOU MUST USE IT**.
   * **Do not** build custom components or algorithms from scratch if the library provides them.
 
+* **DRY Principle (CRITICAL):** Always eliminate code duplication.
+  * Extract repeated logic into reusable functions
+  * Use factory functions for repeated CLI option definitions
+  * Single source of truth for shared behavior
+
+* **Refactoring Guidelines:**
+  * When duplicating CLI options across commands, create option factory functions
+  * When duplicating logic blocks, extract into shared utility functions
+  * Ensure all new functions have comprehensive test coverage
+  * Document refactoring with before/after examples
+
 ## 5. RESPONSE FORMAT
 
 **IF NORMAL:**

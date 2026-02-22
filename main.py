@@ -18,6 +18,53 @@ from pynput import keyboard
 from openai import OpenAI
 from core import chunk_audio, transcribe_audio, process_with_llm, compress_audio
 
+def post_process_option():
+    return typer.Option(None, "--post-process", "-p", help="Prompt for LLM post-processing. Use without arg for default formatting")
+
+def stt_model_option():
+    return typer.Option(GROQ_STT_MODEL, help="Groq STT model to use")
+
+def llm_model_option():
+    return typer.Option(OPENROUTER_LLM_MODEL, "--llm-model", "-l", help="OpenRouter LLM model to use")
+
+def verbose_option():
+    return typer.Option(False, "--verbose", "-v", help="Show verbose error outputs")
+
+def new_option():
+    return typer.Option(False, "--new", "-n", help="Start fresh: Delete all previous 'aitranscribe_record' files")
+
+def english_option():
+    return typer.Option(False, "--english", "-e", help="Translate the spoken text to English")
+
+def apply_english_translation(post_process: str | None) -> str | None:
+    if post_process:
+        return f"Please translate the following text to English, and also follow these instructions: {post_process}"
+    return "Please translate the following text to English, correct grammatical errors, remove filler words, and structure it clearly."
+
+def cleanup_old_records() -> int:
+    temp_dir = tempfile.gettempdir()
+    base_name = "aitranscribe_record"
+    pattern = os.path.join(temp_dir, f"{base_name}_*")
+    deleted_count = 0
+    for f in glob.glob(pattern):
+        try:
+            os.remove(f)
+            deleted_count += 1
+        except OSError as e:
+            console.print(f"[yellow]Could not delete {f}: {e}[/yellow]")
+    if deleted_count > 0:
+        console.print(f"[blue]Deleted {deleted_count} previous recording(s) in {temp_dir}[/blue]")
+    return deleted_count
+
+def validate_api_keys(post_process: str | None) -> None:
+    if not stt_client:
+        console.print(f"[red]Error: GROQ_API_KEY is not set or invalid in {CONFIG_FILE}.[/red]")
+        raise typer.Exit(code=1)
+    
+    if post_process and not llm_client:
+        console.print(f"[red]Error: OPENROUTER_API_KEY is not set but needed for post-processing.[/red]")
+        raise typer.Exit(code=1)
+
 app = typer.Typer(
     help="aitranscribe: CLI tool for STT and LLM post-processing via OpenRouter.",
     context_settings={"help_option_names": ["-h", "--help"]},
@@ -102,13 +149,13 @@ llm_client = OpenAI(
 
 @app.command()
 def file(
-    english: bool = typer.Option(False, "--english", "-e", help="Translate the spoken text to English"),
+    english: bool = english_option(),
     file_path: str = typer.Argument("/tmp/aitranscribe_record.mp3", help="Path to the audio or video file"),
-    llm_model: str = typer.Option(OPENROUTER_LLM_MODEL, "--llm-model", "-l", help="OpenRouter LLM model to use"),
-    new: bool = typer.Option(False, "--new", "-n", help="rm /tmp/aitranscribe_record* before starting"),
-    post_process: str | None = typer.Option(None, "--post-process", "-p", help="Prompt for LLM post-processing. Use without arg for default formatting"),
-    stt_model: str = typer.Option(GROQ_STT_MODEL, help="Groq STT model to use"),
-    verbose: bool = typer.Option(False, "--verbose", "-v", help="Show verbose error outputs"),
+    llm_model: str = llm_model_option(),
+    new: bool = new_option(),
+    post_process: str | None = post_process_option(),
+    stt_model: str = stt_model_option(),
+    verbose: bool = verbose_option(),
 ):
     """
     Transcribe a local audio or video file using Groq STT and optionally process with OpenRouter LLM.
@@ -117,32 +164,12 @@ def file(
         state["verbose"] = True
 
     if english:
-        if post_process:
-            post_process = f"Please translate the following text to English, and also follow these instructions: {post_process}"
-        else:
-            post_process = "Please translate the following text to English, correct grammatical errors, remove filler words, and structure it clearly."
+        post_process = apply_english_translation(post_process)
 
     if new:
-        temp_dir = tempfile.gettempdir()
-        base_name = "aitranscribe_record"
-        pattern = os.path.join(temp_dir, f"{base_name}_*")
-        deleted_count = 0
-        for f in glob.glob(pattern):
-            try:
-                os.remove(f)
-                deleted_count += 1
-            except OSError as e:
-                console.print(f"[yellow]Could not delete {f}: {e}[/yellow]")
-        if deleted_count > 0:
-            console.print(f"[blue]Deleted {deleted_count} previous recording(s) in {temp_dir}[/blue]")
+        cleanup_old_records()
 
-    if not stt_client:
-        console.print(f"[red]Error: GROQ_API_KEY is not set or invalid in {CONFIG_FILE}.[/red]")
-        raise typer.Exit(code=1)
-        
-    if post_process and not llm_client:
-        console.print(f"[red]Error: OPENROUTER_API_KEY is not set but needed for post-processing.[/red]")
-        raise typer.Exit(code=1)
+    validate_api_keys(post_process)
         
     console.print(f"[blue]Preparing to transcribe file: {file_path}[/blue]")
     console.print(f"STT Model: [cyan]{stt_model}[/cyan]")
@@ -241,12 +268,12 @@ def file(
 
 @app.command()
 def record(
-    english: bool = typer.Option(False, "--english", "-e", help="Translate the spoken text to English"),
-    llm_model: str = typer.Option(OPENROUTER_LLM_MODEL, "--llm-model", "-l", help="OpenRouter LLM model to use"),
-    new: bool = typer.Option(False, "--new", "-n", help="rm /tmp/aitranscribe_record* before starting"),
-    post_process: str | None = typer.Option(None, "--post-process", "-p", help="Prompt for LLM post-processing. Use without arg for default formatting"),
-    stt_model: str = typer.Option(GROQ_STT_MODEL, help="Groq STT model to use"),
-    verbose: bool = typer.Option(False, "--verbose", "-v", help="Show verbose error outputs"),
+    english: bool = english_option(),
+    llm_model: str = llm_model_option(),
+    new: bool = new_option(),
+    post_process: str | None = post_process_option(),
+    stt_model: str = stt_model_option(),
+    verbose: bool = verbose_option(),
     update_interval: float = typer.Option(1, help="Duration update interval in seconds"),
 ):
     """
@@ -257,32 +284,12 @@ def record(
         state["verbose"] = True
 
     if english:
-        if post_process:
-            post_process = f"Please translate the following text to English, and also follow these instructions: {post_process}"
-        else:
-            post_process = "Please translate the following text to English, correct grammatical errors, remove filler words, and structure it clearly."
+        post_process = apply_english_translation(post_process)
 
     if new:
-        temp_dir = tempfile.gettempdir()
-        base_name = "aitranscribe_record"
-        pattern = os.path.join(temp_dir, f"{base_name}_*")
-        deleted_count = 0
-        for f in glob.glob(pattern):
-            try:
-                os.remove(f)
-                deleted_count += 1
-            except OSError as e:
-                console.print(f"[yellow]Could not delete {f}: {e}[/yellow]")
-        if deleted_count > 0:
-            console.print(f"[blue]Deleted {deleted_count} previous recording(s) in {temp_dir}[/blue]")
+        cleanup_old_records()
 
-    if not stt_client:
-        console.print(f"[red]Error: GROQ_API_KEY is not set or invalid in {CONFIG_FILE}.[/red]")
-        raise typer.Exit(code=1)
-        
-    if post_process and not llm_client:
-        console.print(f"[red]Error: OPENROUTER_API_KEY is not set but needed for post-processing.[/red]")
-        raise typer.Exit(code=1)
+    validate_api_keys(post_process)
         
     samplerate = 44100
     channels = 1

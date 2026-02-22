@@ -116,7 +116,7 @@ aitranscribe file meeting.wav --post-process "Summarize this meeting and extract
 
 ## 🧪 Testing
 
-We provide a test infrastructure to ensure dependencies are installed and the CLI works.
+We provide a test infrastructure to ensure dependencies are installed and CLI works.
 
 1. Install test dependencies:
 
@@ -131,6 +131,17 @@ We provide a test infrastructure to ensure dependencies are installed and the CL
    ```
 
 Or use `tox` to run them in an isolated environment.
+
+## 🏗️ Code Architecture
+
+The project follows clean code principles with focus on maintainability and testability:
+
+* **Option Factory Pattern:** CLI options are defined through factory functions for consistency and reusability
+* **Shared Logic Helpers:** Common operations are extracted into reusable utility functions
+* **Comprehensive Testing:** All new functions include unit tests and integration tests
+* **Single Source of Truth:** CLI parameters and shared logic are defined once, used everywhere
+
+This architecture ensures that changes to shared functionality only need to be made in one place, reducing duplication and maintenance overhead.
 
 ## 📄 License
 
