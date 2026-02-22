@@ -1,3 +1,5 @@
+import sys
+import time
 import os
 import typer
 import sounddevice as sd
@@ -146,7 +148,8 @@ def record(
     post_process: str = typer.Option(None, "--post-process", help="Prompt for LLM post-processing"),
     stt_model: str = typer.Option(GROQ_STT_MODEL, help="Groq STT model to use"),
     llm_model: str = typer.Option(OPENROUTER_LLM_MODEL, help="OpenRouter LLM model to use"),
-    verbose: bool = typer.Option(False, "--verbose", "-v", help="Show verbose error outputs")
+    verbose: bool = typer.Option(False, "--verbose", "-v", help="Show verbose error outputs"),
+    update_interval: float = typer.Option(2.0, help="Duration update interval in seconds")
 ):
     """
     Record audio from the microphone (Push-to-Talk) and transcribe it using Groq.
@@ -174,7 +177,6 @@ def record(
         nonlocal is_recording, stop_event
         if key == keyboard.Key.space and not is_recording:
             is_recording = True
-            console.print("[green]⏺ Recording... (Speak now)[/green]")
         elif key == keyboard.Key.esc:
             stop_event = True
 
@@ -183,21 +185,69 @@ def record(
         if key == keyboard.Key.space and is_recording:
             is_recording = False
             stop_event = True
-            console.print("[yellow]⏹ Recording stopped.[/yellow]")
+            console.print("\n[yellow]⏹ Recording stopped.[/yellow]")
 
     console.print("[bold]Push-to-Talk Recording[/bold]")
     console.print(f"STT Model: [cyan]{stt_model}[/cyan]")
     console.print("Press and hold [bold cyan]SPACEBAR[/bold cyan] to record. Release to transcribe. Press ESC to cancel.")
 
-    # We use a listener for the spacebar
-    with keyboard.Listener(on_press=on_press, on_release=on_release) as listener:
-        def callback(indata, frames, time, status):
-            if is_recording:
-                audio_data.append(indata.copy())
+    # Try to disable terminal echo for cleaner UI
+    has_termios = False
+    fd = None
+    old_settings = None
+    try:
+        import termios
+        fd = sys.stdin.fileno()
+        old_settings = termios.tcgetattr(fd)
+        new_settings = termios.tcgetattr(fd)
+        new_settings[3] = new_settings[3] & ~termios.ECHO
+        termios.tcsetattr(fd, termios.TCSADRAIN, new_settings)
+        has_termios = True
+    except Exception:
+        pass
 
-        with sd.InputStream(samplerate=samplerate, channels=channels, callback=callback):
-            while not stop_event:
-                sd.sleep(100)
+    try:
+        # We use a listener for the spacebar
+        with keyboard.Listener(on_press=on_press, on_release=on_release) as listener:
+            def callback(indata, frames, cb_time, status):
+                if is_recording:
+                    audio_data.append(indata.copy())
+
+            with sd.InputStream(samplerate=samplerate, channels=channels, callback=callback):
+                start_time = None
+                last_update = 0.0
+
+                while not stop_event:
+                    sd.sleep(100)
+                    if is_recording:
+                        now = time.time()
+                        if start_time is None:
+                            start_time = now
+                            last_update = start_time
+                            sys.stdout.write("\r\033[K\033[32m⏺ Recording... 0.0s\033[0m")
+                            sys.stdout.flush()
+
+                        # Actively backspace if OS key-repeat prints spaces
+                        if not has_termios:
+                            sys.stdout.write('\b \b' * 10)
+                            sys.stdout.flush()
+
+                        if now - last_update >= update_interval:
+                            duration = now - start_time
+                            sys.stdout.write(f"\r\033[K\033[32m⏺ Recording... {duration:.1f}s\033[0m")
+                            sys.stdout.flush()
+                            last_update = now
+                    else:
+                        start_time = None
+    finally:
+        # Restore terminal echo
+        if has_termios and fd is not None and old_settings is not None:
+            try:
+                import termios
+                termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
+                termios.tcflush(fd, termios.TCIFLUSH)
+            except Exception:
+                pass
                 
     if not audio_data:
         console.print("[red]No audio recorded. Exiting.[/red]")
