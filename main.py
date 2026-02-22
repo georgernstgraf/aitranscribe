@@ -74,12 +74,11 @@ llm_client = OpenAI(
 @app.command()
 def file(
     file_path: str = typer.Argument("/tmp/aitranscribe_record.mp3", help="Path to the audio or video file"),
-    post_process: str | None = typer.Option(None, "--post-process", help="Prompt for LLM post-processing"),
+    post_process: str | None = typer.Option(None, "--post-process", "-p", help="Prompt for LLM post-processing"),
     stt_model: str = typer.Option(GROQ_STT_MODEL, help="Groq STT model to use"),
     llm_model: str = typer.Option(OPENROUTER_LLM_MODEL, help="OpenRouter LLM model to use"),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Show verbose error outputs"),
-    english: bool = typer.Option(False, "--english", "--englisch", "-e", help="Translate the spoken text to English"),
-    raw: bool = typer.Option(False, "--raw", "-r", help="Output raw transcription without any LLM post-processing")
+    english: bool = typer.Option(False, "--english", "--englisch", "-e", help="Translate the spoken text to English")
 ):
     """
     Transcribe a local audio or video file using Groq STT and optionally process with OpenRouter LLM.
@@ -87,24 +86,18 @@ def file(
     if verbose:
         state["verbose"] = True
 
-    if raw:
-        post_process = None
-    else:
-        if english:
-            if post_process:
-                post_process = f"Please translate the following text to English, and also follow these instructions: {post_process}"
-            else:
-                post_process = "Please translate the following text to English, correct grammatical errors, remove filler words, and structure it clearly."
+    if english:
+        if post_process:
+            post_process = f"Please translate the following text to English, and also follow these instructions: {post_process}"
         else:
-            if not post_process:
-                post_process = "Please correct grammatical errors, remove filler words, and structure the text clearly with paragraphs and proper punctuation. Preserve the original language and meaning."
+            post_process = "Please translate the following text to English, correct grammatical errors, remove filler words, and structure it clearly."
 
     if not stt_client:
         console.print(f"[red]Error: GROQ_API_KEY is not set or invalid in {CONFIG_FILE}.[/red]")
         raise typer.Exit(code=1)
         
     if post_process and not llm_client:
-        console.print(f"[red]Error: OPENROUTER_API_KEY is not set but needed for post-processing. Use --raw to skip LLM.[/red]")
+        console.print(f"[red]Error: OPENROUTER_API_KEY is not set but needed for post-processing.[/red]")
         raise typer.Exit(code=1)
         
     console.print(f"[blue]Preparing to transcribe file: {file_path}[/blue]")
@@ -167,14 +160,13 @@ def file(
 
 @app.command()
 def record(
-    post_process: str | None = typer.Option(None, "--post-process", help="Prompt for LLM post-processing"),
+    post_process: str | None = typer.Option(None, "--post-process", "-p", help="Prompt for LLM post-processing"),
     stt_model: str = typer.Option(GROQ_STT_MODEL, help="Groq STT model to use"),
     llm_model: str = typer.Option(OPENROUTER_LLM_MODEL, help="OpenRouter LLM model to use"),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Show verbose error outputs"),
     update_interval: float = typer.Option(0.4, help="Duration update interval in seconds"),
     new: bool = typer.Option(False, "--new", "-n", help="Delete all previous recordings in the temporary directory before starting"),
-    english: bool = typer.Option(False, "--english", "--englisch", "-e", help="Translate the spoken text to English"),
-    raw: bool = typer.Option(False, "--raw", "-r", help="Output raw transcription without any LLM post-processing")
+    english: bool = typer.Option(False, "--english", "--englisch", "-e", help="Translate the spoken text to English")
 ):
     """
     Record audio from the microphone (Push-to-Talk) and transcribe it using Groq.
@@ -183,17 +175,11 @@ def record(
     if verbose:
         state["verbose"] = True
 
-    if raw:
-        post_process = None
-    else:
-        if english:
-            if post_process:
-                post_process = f"Please translate the following text to English, and also follow these instructions: {post_process}"
-            else:
-                post_process = "Please translate the following text to English, correct grammatical errors, remove filler words, and structure it clearly."
+    if english:
+        if post_process:
+            post_process = f"Please translate the following text to English, and also follow these instructions: {post_process}"
         else:
-            if not post_process:
-                post_process = "Please correct grammatical errors, remove filler words, and structure the text clearly with paragraphs and proper punctuation. Preserve the original language and meaning."
+            post_process = "Please translate the following text to English, correct grammatical errors, remove filler words, and structure it clearly."
 
     if new:
         temp_dir = tempfile.gettempdir()
@@ -214,7 +200,7 @@ def record(
         raise typer.Exit(code=1)
         
     if post_process and not llm_client:
-        console.print(f"[red]Error: OPENROUTER_API_KEY is not set but needed for post-processing. Use --raw to skip LLM.[/red]")
+        console.print(f"[red]Error: OPENROUTER_API_KEY is not set but needed for post-processing.[/red]")
         raise typer.Exit(code=1)
         
     samplerate = 44100
