@@ -1,0 +1,60 @@
+import os
+from pathlib import Path
+from openai import OpenAI
+from pydub import AudioSegment
+
+def get_audio_duration(file_path: str) -> float:
+    """Return the duration of the audio file in seconds."""
+    audio = AudioSegment.from_file(file_path)
+    return len(audio) / 1000.0
+
+def chunk_audio(file_path: str, max_size_mb: int = 25) -> list[str]:
+    """
+    Splits an audio file into chunks smaller than max_size_mb.
+    Returns a list of file paths to the chunks.
+    """
+    file_size_mb = os.path.getsize(file_path) / (1024 * 1024)
+    if file_size_mb <= max_size_mb:
+        return [file_path]
+
+    # Chunk by 10-minute segments to be safe
+    audio = AudioSegment.from_file(file_path)
+    chunk_length_ms = 10 * 60 * 1000 # 10 minutes
+    chunks = []
+    
+    file_name = Path(file_path).stem
+    file_ext = Path(file_path).suffix
+    output_dir = Path(file_path).parent
+    
+    for i, chunk_start in enumerate(range(0, len(audio), chunk_length_ms)):
+        chunk = audio[chunk_start:chunk_start + chunk_length_ms]
+        chunk_path = output_dir / f"{file_name}_chunk{i}{file_ext}"
+        chunk.export(str(chunk_path), format=file_ext.strip("."))
+        chunks.append(str(chunk_path))
+        
+    return chunks
+
+def transcribe_audio(client: OpenAI, file_path: str, stt_model: str) -> str:
+    """Transcribes a single audio file using the provided client and model."""
+    with open(file_path, "rb") as audio_file:
+        transcript = client.audio.transcriptions.create(
+            model=stt_model,
+            file=audio_file,
+            response_format="text"
+        )
+    return transcript
+
+def process_with_llm(client: OpenAI, text: str, prompt: str, llm_model: str) -> str:
+    """Sends the transcribed text to an LLM for post-processing."""
+    system_prompt = "You are a helpful assistant analyzing an audio transcription."
+    if prompt:
+        system_prompt += f"\nUser Request: {prompt}"
+        
+    response = client.chat.completions.create(
+        model=llm_model,
+        messages=[
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": f"Here is the transcription:\n\n{text}"}
+        ]
+    )
+    return response.choices[0].message.content
