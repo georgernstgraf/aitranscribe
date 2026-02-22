@@ -39,6 +39,9 @@ def english_option():
 def help_option():
     return typer.Option(False, "--help", "-h", is_eager=True)
 
+def file_path_argument():
+    return typer.Argument("/tmp/aitranscribe_record.mp3", help="Path to the audio or video file")
+
 def apply_english_translation(post_process: str | None) -> str | None:
     if post_process:
         return f"Please translate the following text to English, and also follow these instructions: {post_process}"
@@ -153,7 +156,7 @@ llm_client = OpenAI(
 @app.command()
 def file(
     english: bool = english_option(),
-    file_path: str = typer.Argument("/tmp/aitranscribe_record.mp3", help="Path to the audio or video file"),
+    file_path: str = file_path_argument(),
     llm_model: str = llm_model_option(),
     new: bool = new_option(),
     post_process: str | None = post_process_option(),

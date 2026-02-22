@@ -21,6 +21,7 @@ try:
         new_option,
         english_option,
         help_option,
+        file_path_argument,
         apply_english_translation,
         cleanup_old_records,
         validate_api_keys,
@@ -87,6 +88,11 @@ def test_help_option():
     """Test that help_option returns correct typer.Option."""
     option = help_option()
     assert isinstance(option, typer.models.OptionInfo)
+
+def test_file_path_argument():
+    """Test that file_path_argument returns correct typer.Argument."""
+    argument = file_path_argument()
+    assert isinstance(argument, typer.models.ArgumentInfo)
 
 
 # ==================== Logic Helper Tests ====================
