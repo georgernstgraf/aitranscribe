@@ -389,7 +389,7 @@ if __name__ == "__main__":
     for i, arg in enumerate(args):
         if arg == "-p" or arg == "--post-process":
             if i + 1 == len(args) or args[i + 1].startswith("-"):
-                args.insert(i + 1, "Bitte glätte und strukturiere den folgenden Text, entferne Füllwörter, korrigiere grammatikalische Fehler, aber übersetze ihn nicht.")
+                args.insert(i + 1, "Please smooth and structure the following text, remove filler words, correct grammatical errors, but do not translate it.")
                 
     if not any(arg in ["file", "record", "--help", "-h", "--install-completion", "--show-completion"] for arg in args):
         args.insert(0, "record")
