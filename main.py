@@ -7,6 +7,7 @@ import sounddevice as sd
 import soundfile as sf
 import numpy as np
 import tempfile
+import glob
 import subprocess
 from pathlib import Path
 from rich.console import Console
@@ -156,7 +157,8 @@ def record(
     stt_model: str = typer.Option(GROQ_STT_MODEL, help="Groq STT model to use"),
     llm_model: str = typer.Option(OPENROUTER_LLM_MODEL, help="OpenRouter LLM model to use"),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Show verbose error outputs"),
-    update_interval: float = typer.Option(0.4, help="Duration update interval in seconds")
+    update_interval: float = typer.Option(0.4, help="Duration update interval in seconds"),
+    new: bool = typer.Option(False, "--new", "-n", help="Delete all previous recordings in the temporary directory before starting")
 ):
     """
     Record audio from the microphone (Push-to-Talk) and transcribe it using Groq.
@@ -164,6 +166,20 @@ def record(
     """
     if verbose:
         state["verbose"] = True
+
+    if new:
+        temp_dir = tempfile.gettempdir()
+        base_name = "aitranscribe_record"
+        pattern = os.path.join(temp_dir, f"{base_name}_*")
+        deleted_count = 0
+        for f in glob.glob(pattern):
+            try:
+                os.remove(f)
+                deleted_count += 1
+            except OSError as e:
+                console.print(f"[yellow]Could not delete {f}: {e}[/yellow]")
+        if deleted_count > 0:
+            console.print(f"[blue]Deleted {deleted_count} previous recording(s) in {temp_dir}[/blue]")
 
     if not stt_client:
         console.print(f"[red]Error: GROQ_API_KEY is not set or invalid in {CONFIG_FILE}.[/red]")
