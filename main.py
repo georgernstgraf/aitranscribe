@@ -156,7 +156,7 @@ def record(
     stt_model: str = typer.Option(GROQ_STT_MODEL, help="Groq STT model to use"),
     llm_model: str = typer.Option(OPENROUTER_LLM_MODEL, help="OpenRouter LLM model to use"),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Show verbose error outputs"),
-    update_interval: float = typer.Option(2.0, help="Duration update interval in seconds")
+    update_interval: float = typer.Option(0.4, help="Duration update interval in seconds")
 ):
     """
     Record audio from the microphone (Push-to-Talk) and transcribe it using Groq.
