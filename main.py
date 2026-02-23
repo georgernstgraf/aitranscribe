@@ -92,6 +92,15 @@ def english_option():
 def help_option():
     return typer.Option(False, "--help", "-h", is_eager=True)
 
+def file_option():
+    return typer.Option(None, "--file", "-f", help="Path to audio/video file (default: record from microphone)")
+
+def list_prompts_option():
+    return typer.Option(False, "--list", "-l", help="List all stored prompts")
+
+def query_prompt_option():
+    return typer.Option(False, "--query", "-q", help="Get oldest prompt (queue behavior)")
+
 def file_path_argument():
     return typer.Argument("/tmp/aitranscribe_record.mp3", help="Path to audio or video file")
 
@@ -227,9 +236,9 @@ app = typer.Typer(
 @app.callback(invoke_without_command=True)
 def main(
     ctx: typer.Context,
-    file: str | None = typer.Option(None, "--file", "-f", help="Path to audio/video file (default: record from microphone)"),
-    list_prompts: bool = typer.Option(False, "--list", "-l", help="List all stored prompts"),
-    query_prompt: bool = typer.Option(False, "--query", "-q", help="Get oldest prompt (queue behavior)"),
+    file: str | None = file_option(),
+    list_prompts: bool = list_prompts_option(),
+    query_prompt: bool = query_prompt_option(),
     english: bool = english_option(),
     llm_model: str = llm_model_option(),
     new: bool = new_option(),

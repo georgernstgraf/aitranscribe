@@ -21,8 +21,11 @@ try:
         new_option,
         english_option,
         help_option,
+        file_option,
         file_path_argument,
         update_interval_option,
+        list_prompts_option,
+        query_prompt_option,
         apply_english_translation,
         cleanup_old_records,
         validate_api_keys,
@@ -100,6 +103,20 @@ def test_update_interval_option():
     option = update_interval_option()
     assert isinstance(option, typer.models.OptionInfo)
 
+def test_file_option():
+    """Test that file_option returns correct typer.Option."""
+    option = file_option()
+    assert isinstance(option, typer.models.OptionInfo)
+
+def test_list_prompts_option():
+    """Test that list_prompts_option returns correct typer.Option."""
+    option = list_prompts_option()
+    assert isinstance(option, typer.models.OptionInfo)
+
+def test_query_prompt_option():
+    """Test that query_prompt_option returns correct typer.Option."""
+    option = query_prompt_option()
+    assert isinstance(option, typer.models.OptionInfo)
 
 # ==================== Logic Helper Tests ====================
 
