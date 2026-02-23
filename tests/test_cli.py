@@ -26,6 +26,7 @@ try:
         apply_english_translation,
         cleanup_old_records,
         validate_api_keys,
+        wrap_text,
         console,
         CONFIG_FILE,
         stt_client,
@@ -178,6 +179,28 @@ def test_validate_api_keys_success():
             validate_api_keys(None)
             validate_api_keys("test prompt")
 
+def test_wrap_text_short():
+    """Test that wrap_text doesn't wrap short text."""
+    result = wrap_text("Short text", 80)
+    assert result == "Short text"
+
+def test_wrap_text_long():
+    """Test that wrap_text wraps long text at 80 characters."""
+    long_text = "This is a very long text that should be wrapped at exactly eighty characters per line to ensure proper formatting"
+    result = wrap_text(long_text, 80)
+    lines = result.split('\n')
+    assert all(len(line) <= 80 for line in lines)
+    assert len(lines) > 1
+
+def test_wrap_text_whitespace():
+    """Test that wrap_text breaks at whitespace, not mid-word."""
+    text = "This is a test of text wrapping functionality"
+    result = wrap_text(text, 20)
+    lines = result.split('\n')
+    assert len(lines) == 3
+    assert lines[0] == "This is a test of"
+    assert lines[1] == "text wrapping"
+    assert lines[2] == "functionality"
 
 # ==================== Integration Tests ====================
 
@@ -197,4 +220,4 @@ def test_cli_query_prompt_empty():
     """Test that --query option works with empty queue."""
     result = runner.invoke(app, ["--query"])
     assert result.exit_code == 0
-    assert "No prompts in queue" in result.stdout or "Retrieved prompt:" in result.stdout
+    assert "No prompts in queue" in result.stdout

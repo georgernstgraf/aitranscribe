@@ -128,6 +128,30 @@ def validate_api_keys(post_process: str | None) -> None:
         console.print(f"[red]Error: OPENROUTER_API_KEY is not set but needed for post-processing.[/red]")
         raise typer.Exit(code=1)
 
+def wrap_text(text: str, max_length: int = 80) -> str:
+    """Wrap text to specified max length, breaking at whitespace."""
+    if len(text) <= max_length:
+        return text
+
+    words = text.split()
+    wrapped_lines = []
+    current_line = ""
+
+    for word in words:
+        if len(current_line + " " + word) <= max_length:
+            if current_line:
+                current_line += " " + word
+            else:
+                current_line = word
+        else:
+            wrapped_lines.append(current_line.strip())
+            current_line = word
+
+    if current_line.strip():
+        wrapped_lines.append(current_line.strip())
+
+    return "\n".join(wrapped_lines)
+
 # Prompt Manager Class
 class PromptManager:
     """Manages stored prompts in a JSON file."""
@@ -174,7 +198,7 @@ class PromptManager:
 
         console.print("[bold]Stored Prompts:[/bold]")
         for i, prompt in enumerate(self.prompts, 1):
-            console.print(f"\n[cyan]{i}.[/cyan] [green]{prompt['prompt']}[/green]")
+            console.print(f"\n[cyan]{i}.[/cyan] {wrap_text(prompt['prompt'])}")
             console.print(f"    [dim]File: {prompt['filename']}[/dim]")
             console.print(f"    [dim]Time: {prompt['timestamp']}[/dim]")
 
@@ -236,8 +260,8 @@ def main(
     if query_prompt:
         retrieved_prompt = prompt_manager.query_prompt()
         if retrieved_prompt:
-            console.print(f"[bold]Retrieved prompt:[/bold] [green]{retrieved_prompt}[/green]")
-        raise typer.Exit(code=0)
+            console.print(retrieved_prompt)
+            raise typer.Exit(code=0)
 
     if file:
         transcribe_file(file, stt_model, llm_model, post_process, verbose, english, new)
