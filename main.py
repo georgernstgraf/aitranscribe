@@ -10,6 +10,8 @@ import numpy as np
 import tempfile
 import glob
 import subprocess
+import json
+import datetime
 from pathlib import Path
 from rich.console import Console
 from rich.progress import Progress, SpinnerColumn, TextColumn
@@ -24,6 +26,7 @@ state = {"verbose": False}
 # Configuration Directory
 CONFIG_DIR = Path.home() / ".config" / "aitranscribe"
 CONFIG_FILE = CONFIG_DIR / "config"
+PROMPTS_FILE = CONFIG_DIR / "prompts.json"
 
 # Create default config if it doesn't exist
 if not CONFIG_FILE.exists() or "GROQ_API_KEY" not in CONFIG_FILE.read_text():
@@ -40,11 +43,14 @@ if not CONFIG_FILE.exists() or "GROQ_API_KEY" not in CONFIG_FILE.read_text():
         f.write('GROQ_STT_MODEL="whisper-large-v3-turbo"\n')
         if mode == "w":
             f.write('OPENROUTER_LLM_MODEL="anthropic/claude-3-haiku"\n')
+        f.write(f'PROMPTS_FILE="{PROMPTS_FILE}"\n')
     console.print(f"[yellow]Updated/Created configuration at {CONFIG_FILE}[/yellow]")
     console.print("[yellow]Please edit this file to add your API keys before running the tool.[/yellow]")
 
 # Load environment variables from global config
 load_dotenv(dotenv_path=CONFIG_FILE)
+
+PROMPTS_FILE = Path(os.getenv("PROMPTS_FILE", str(PROMPTS_FILE)))
 
 # API Keys and Models
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
@@ -64,6 +70,7 @@ llm_client = OpenAI(
     api_key=OPENROUTER_API_KEY,
 ) if OPENROUTER_API_KEY and OPENROUTER_API_KEY != "your_openrouter_api_key_here" else None
 
+# Option Factory Functions
 def post_process_option():
     return typer.Option(None, "--post-process", "-p", help="Prompt for LLM post-processing. Use without arg for default formatting")
 
@@ -71,7 +78,7 @@ def stt_model_option():
     return typer.Option(GROQ_STT_MODEL, help="Groq STT model to use")
 
 def llm_model_option():
-    return typer.Option(OPENROUTER_LLM_MODEL, "--llm-model", "-l", help="OpenRouter LLM model to use")
+    return typer.Option(OPENROUTER_LLM_MODEL, "--llm-model", "-m", help="OpenRouter LLM model to use")
 
 def verbose_option():
     return typer.Option(False, "--verbose", "-v", help="Show verbose error outputs")
@@ -91,10 +98,11 @@ def file_path_argument():
 def update_interval_option():
     return typer.Option(1, help="Duration update interval in seconds")
 
+# Logic Helper Functions
 def apply_english_translation(post_process: str | None) -> str | None:
     if post_process:
-        return f"Please translate the following text to English, and also follow these instructions: {post_process}"
-    return "Please translate the following text to English, correct grammatical errors, remove filler words, and structure it clearly."
+        return f"Please translate to following text to English, and also follow these instructions: {post_process}"
+    return "Please translate to following text to English, correct grammatical errors, remove filler words, and structure it clearly."
 
 def cleanup_old_records() -> int:
     temp_dir = tempfile.gettempdir()
@@ -120,6 +128,70 @@ def validate_api_keys(post_process: str | None) -> None:
         console.print(f"[red]Error: OPENROUTER_API_KEY is not set but needed for post-processing.[/red]")
         raise typer.Exit(code=1)
 
+# Prompt Manager Class
+class PromptManager:
+    """Manages stored prompts in a JSON file."""
+
+    def __init__(self, prompts_file: Path):
+        self.prompts_file = prompts_file
+        self.prompts_file.parent.mkdir(parents=True, exist_ok=True)
+        self.prompts = self._load_prompts()
+
+    def _load_prompts(self) -> list:
+        """Load prompts from JSON file."""
+        if self.prompts_file.exists():
+            try:
+                with open(self.prompts_file, 'r', encoding='utf-8') as f:
+                    return json.load(f)
+            except Exception as e:
+                console.print(f"[yellow]Warning: Could not load prompts file: {e}[/yellow]")
+                return []
+        return []
+
+    def _save_prompts(self) -> None:
+        """Save prompts to JSON file."""
+        try:
+            with open(self.prompts_file, 'w', encoding='utf-8') as f:
+                json.dump(self.prompts, f, indent=2)
+        except Exception as e:
+            console.print(f"[yellow]Warning: Could not save prompts file: {e}[/yellow]")
+
+    def add_prompt(self, prompt: str, filename: str) -> None:
+        """Add a new prompt to the end of the list."""
+        prompt_entry = {
+            "prompt": prompt,
+            "filename": filename,
+            "timestamp": datetime.datetime.now().isoformat()
+        }
+        self.prompts.append(prompt_entry)
+        self._save_prompts()
+
+    def list_prompts(self) -> None:
+        """List all stored prompts in order."""
+        if not self.prompts:
+            console.print("[yellow]No prompts stored yet.[/yellow]")
+            return
+
+        console.print("[bold]Stored Prompts:[/bold]")
+        for i, prompt in enumerate(self.prompts, 1):
+            console.print(f"\n[cyan]{i}.[/cyan] [green]{prompt['prompt']}[/green]")
+            console.print(f"    [dim]File: {prompt['filename']}[/dim]")
+            console.print(f"    [dim]Time: {prompt['timestamp']}[/dim]")
+
+    def query_prompt(self) -> str | None:
+        """Get the oldest prompt and remove it from the list (queue behavior)."""
+        if not self.prompts:
+            console.print("[yellow]No prompts in queue.[/yellow]")
+            return None
+
+        oldest_prompt = self.prompts.pop(0)
+        self._save_prompts()
+        return oldest_prompt['prompt']
+
+# Initialize PromptManager
+prompt_manager = PromptManager(PROMPTS_FILE)
+
+# Typer App
 app = typer.Typer(
     help="aitranscribe: CLI tool for STT and LLM post-processing via OpenRouter.",
     context_settings={"help_option_names": ["-h", "--help"]},
@@ -132,6 +204,8 @@ app = typer.Typer(
 def main(
     ctx: typer.Context,
     file: str | None = typer.Option(None, "--file", "-f", help="Path to audio/video file (default: record from microphone)"),
+    list_prompts: bool = typer.Option(False, "--list", "-l", help="List all stored prompts"),
+    query_prompt: bool = typer.Option(False, "--query", "-q", help="Get oldest prompt (queue behavior)"),
     english: bool = english_option(),
     llm_model: str = llm_model_option(),
     new: bool = new_option(),
@@ -153,6 +227,17 @@ def main(
         return
 
     state["verbose"] = verbose
+
+    # Handle prompt management commands
+    if list_prompts:
+        prompt_manager.list_prompts()
+        raise typer.Exit(code=0)
+
+    if query_prompt:
+        retrieved_prompt = prompt_manager.query_prompt()
+        if retrieved_prompt:
+            console.print(f"[bold]Retrieved prompt:[/bold] [green]{retrieved_prompt}[/green]")
+        raise typer.Exit(code=0)
 
     if file:
         transcribe_file(file, stt_model, llm_model, post_process, verbose, english, new)
@@ -222,6 +307,7 @@ def transcribe_file(file_path: str, stt_model: str, llm_model: str, post_process
             full_transcript = []
             for i, chunk_path in enumerate(chunks):
                 progress.update(progress.task_ids[0], description=f"Transcribing chunk {i+1}/{len(chunks)}...")
+                assert stt_client is not None
                 transcript = transcribe_audio(stt_client, chunk_path, stt_model)
                 full_transcript.append(transcript)
 
@@ -268,7 +354,7 @@ def transcribe_file(file_path: str, stt_model: str, llm_model: str, post_process
         raise typer.Exit(code=1)
 
 def record_from_microphone(stt_model: str, llm_model: str, post_process: str | None, verbose: bool, english: bool, new: bool, update_interval: float):
-    """Record audio from the microphone (Push-to-Talk) and transcribe it using Groq."""
+    """Record audio from microphone (Push-to-Talk) and transcribe it using Groq."""
     if verbose:
         state["verbose"] = True
 
@@ -279,11 +365,11 @@ def record_from_microphone(stt_model: str, llm_model: str, post_process: str | N
         cleanup_old_records()
 
     validate_api_keys(post_process)
-        
+
     samplerate = 44100
     channels = 1
     audio_data = []
-    
+
     is_recording = False
     stop_event = False
 
@@ -293,7 +379,7 @@ def record_from_microphone(stt_model: str, llm_model: str, post_process: str | N
             is_recording = True
         elif key == keyboard.Key.esc:
             stop_event = True
-            return False  # type: ignore
+            return False
 
     def on_release(key) -> None:
         nonlocal is_recording, stop_event
@@ -301,7 +387,7 @@ def record_from_microphone(stt_model: str, llm_model: str, post_process: str | N
             is_recording = False
             stop_event = True
             console.print("\n[yellow]⏹ Recording stopped.[/yellow]")
-            return False  # type: ignore
+            return False
 
     console.print("[bold]Push-to-Talk Recording[/bold]")
     console.print(f"STT Model: [cyan]{stt_model}[/cyan]")
@@ -365,17 +451,17 @@ def record_from_microphone(stt_model: str, llm_model: str, post_process: str | N
                 termios.tcflush(fd, termios.TCIFLUSH)
             except Exception:
                 pass
-                
+
     if not audio_data:
         console.print("[red]No audio recorded. Exiting.[/red]")
         return
 
     # Convert to numpy array
     audio_np = np.concatenate(audio_data, axis=0)
-    
+
     # Save to temp file
     temp_dir = tempfile.gettempdir()
-    
+
     # Determine the next version number for output files
     base_name = "aitranscribe_record"
     pattern = re.compile(rf"^{re.escape(base_name)}_v(\d+)(?:\.prompted)?\.[a-zA-Z0-9]+$")
@@ -390,34 +476,34 @@ def record_from_microphone(stt_model: str, llm_model: str, post_process: str | N
     except OSError:
         pass
     next_v = max_v + 1
-    
+
     raw_wav_file = os.path.join(temp_dir, ".aitranscribe_raw.wav")
     final_mp3_file = os.path.join(temp_dir, f"{base_name}_v{next_v:02d}.mp3")
-    
+
     sf.write(raw_wav_file, audio_np, samplerate)
-    
+
     try:
         with Progress(
             SpinnerColumn(),
             TextColumn("[progress.description]{task.description}"),
             transient=True,
         ) as progress:
-            # First, compress the WAV to MP3 to save bandwidth and potentially tokens
+            # First, compress WAV to MP3 to save bandwidth and potentially tokens
             progress.add_task(description="Compressing audio...", total=None)
             compress_audio(raw_wav_file, output_path=final_mp3_file)
-            
+
             # Clean up the raw wav now that we have the mp3
             if os.path.exists(raw_wav_file):
                 os.remove(raw_wav_file)
 
             console.print(f"[blue]Audio saved to {final_mp3_file}[/blue]")
-            
+
             progress.add_task(description="Transcribing audio...", total=None)
             transcript = transcribe_audio(stt_client, final_mp3_file, stt_model)
-        
+
         console.print("\n[bold green]Transcription Complete:[/bold green]")
         console.print(transcript)
-        
+
         # Write transcription to a text file next to the mp3
         final_txt_file = final_mp3_file.replace(".mp3", ".txt") if final_mp3_file.endswith(".mp3") else final_mp3_file + ".txt"
         with open(final_txt_file, "w", encoding="utf-8") as f:
@@ -429,7 +515,7 @@ def record_from_microphone(stt_model: str, llm_model: str, post_process: str | N
             console.print(f"\n[bold blue]Applying LLM Post-Processing...[/bold blue]")
             console.print(f"Prompt: [magenta]{post_process}[/magenta]")
             console.print(f"Model: [cyan]{llm_model}[/cyan]")
-            
+
             with Progress(
                 SpinnerColumn(),
                 TextColumn("[progress.description]{task.description}"),
@@ -438,14 +524,17 @@ def record_from_microphone(stt_model: str, llm_model: str, post_process: str | N
                 progress.add_task(description="Processing with LLM...", total=None)
                 assert llm_client is not None
                 llm_result = process_with_llm(llm_client, transcript, post_process, llm_model)
-                
+
             console.print("\n[bold green]LLM Result:[/bold green]")
             console.print(llm_result)
-            
+
             # Write the LLM result to the text file instead of the raw transcript
             with open(final_txt_file, "w", encoding="utf-8") as f:
                 f.write(f"{llm_result.strip()}\n")
             console.print(f"[blue]Text file updated with LLM result at {final_txt_file}[/blue]")
+
+            # Store prompt in queue for later retrieval
+            prompt_manager.add_prompt(transcript, final_mp3_file)
 
     except Exception as e:
         console.print(f"[red]An error occurred: {str(e)}[/red]")
@@ -460,31 +549,4 @@ def record_from_microphone(stt_model: str, llm_model: str, post_process: str | N
             os.remove(raw_wav_file)
 
 if __name__ == "__main__":
-    args = sys.argv[1:]
-    
-    # Pre-process arguments to handle `-p` without argument
-    # Also handle combined short options like `-vp`
-    i = 0
-    while i < len(args):
-        arg = args[i]
-        
-        # Handle combined short options (e.g., -vp, -pv, -vpe)
-        if arg.startswith("-") and not arg.startswith("--") and len(arg) > 2:
-            # Split combined options
-            for j in range(1, len(arg)):
-                args.insert(i + j, f"-{arg[j]}")
-            del args[i]
-            # Re-process from the current position
-            continue
-        
-        # Check for -p or --post-process without argument
-        if arg == "-p" or arg == "--post-process":
-            if i + 1 == len(args) or args[i + 1].startswith("-"):
-                args.insert(i + 1, "Please smooth and structure the following text, remove filler words, correct grammatical errors, but do not translate it.")
-                i += 2
-                continue
-        
-        i += 1
-
-    sys.argv[1:] = args
     app()
