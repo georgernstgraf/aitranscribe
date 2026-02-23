@@ -101,8 +101,8 @@ def update_interval_option():
 # Logic Helper Functions
 def apply_english_translation(post_process: str | None) -> str | None:
     if post_process:
-        return f"Please translate to following text to English, and also follow these instructions: {post_process}"
-    return "Please translate to following text to English, correct grammatical errors, remove filler words, and structure it clearly."
+        return f"Please translate the following text to English, and also follow these instructions: {post_process}"
+    return "Please translate the following text to English, correct grammatical errors, remove filler words, and structure it clearly."
 
 def cleanup_old_records() -> int:
     temp_dir = tempfile.gettempdir()

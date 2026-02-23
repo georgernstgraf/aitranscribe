@@ -186,3 +186,15 @@ def test_cli_without_file_option():
     result = runner.invoke(app, ["--help"])
     assert result.exit_code == 0
     assert "--file" in result.stdout
+
+def test_cli_list_prompts_empty():
+    """Test that --list option works with empty queue."""
+    result = runner.invoke(app, ["--list"])
+    assert result.exit_code == 0
+    assert "No prompts stored yet" in result.stdout or "Stored Prompts:" in result.stdout
+
+def test_cli_query_prompt_empty():
+    """Test that --query option works with empty queue."""
+    result = runner.invoke(app, ["--query"])
+    assert result.exit_code == 0
+    assert "No prompts in queue" in result.stdout or "Retrieved prompt:" in result.stdout
