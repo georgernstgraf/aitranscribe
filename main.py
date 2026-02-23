@@ -510,6 +510,9 @@ def record_from_microphone(stt_model: str, llm_model: str, post_process: str | N
             f.write(f"{transcript.strip()}\n")
         console.print(f"[blue]Transcription saved to {final_txt_file}[/blue]")
 
+        # Store prompt in queue for later retrieval (always save, not just when post_process)
+        prompt_manager.add_prompt(transcript, final_mp3_file)
+
         # Post-Processing
         if post_process:
             console.print(f"\n[bold blue]Applying LLM Post-Processing...[/bold blue]")
@@ -528,13 +531,10 @@ def record_from_microphone(stt_model: str, llm_model: str, post_process: str | N
             console.print("\n[bold green]LLM Result:[/bold green]")
             console.print(llm_result)
 
-            # Write the LLM result to the text file instead of the raw transcript
+            # Write LLM result to the text file instead of the raw transcript
             with open(final_txt_file, "w", encoding="utf-8") as f:
                 f.write(f"{llm_result.strip()}\n")
             console.print(f"[blue]Text file updated with LLM result at {final_txt_file}[/blue]")
-
-            # Store prompt in queue for later retrieval
-            prompt_manager.add_prompt(transcript, final_mp3_file)
 
     except Exception as e:
         console.print(f"[red]An error occurred: {str(e)}[/red]")
