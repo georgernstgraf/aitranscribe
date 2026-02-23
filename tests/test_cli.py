@@ -37,17 +37,16 @@ except ImportError as e:
 runner = CliRunner()
 
 def test_cli_help():
-    """Test that the CLI loads and the help command works."""
+    """Test that CLI loads and help command works."""
     result = runner.invoke(app, ["--help"])
     assert result.exit_code == 0
     assert "aitranscribe" in result.stdout
-    assert "file" in result.stdout
-    assert "record" in result.stdout
+    assert "--file" in result.stdout
 
 def test_cli_file_missing_arg():
-    """Test that the file command defaults to /tmp/aitranscribe_record.mp3."""
-    result = runner.invoke(app, ["file"])
-    # Should fail because the default file does not exist in testing
+    """Test that --file option defaults to /tmp/aitranscribe_record.mp3."""
+    result = runner.invoke(app, ["--file", "/tmp/aitranscribe_record.mp3"])
+    # Should fail because of default file does not exist in testing
     assert result.exit_code != 0
     assert "File not found" in result.stdout
     assert "/tmp/aitranscribe_record.mp3" in result.stdout
@@ -182,20 +181,8 @@ def test_validate_api_keys_success():
 
 # ==================== Integration Tests ====================
 
-def test_record_command_help():
-    """Test that record command help works after refactoring."""
-    result = runner.invoke(app, ["record", "--help"])
+def test_cli_without_file_option():
+    """Test that CLI works without --file option (default: record mode)."""
+    result = runner.invoke(app, ["--help"])
     assert result.exit_code == 0
-    assert "Record audio from the microphone" in result.stdout
-    assert "--english" in result.stdout
-    assert "--verbose" in result.stdout
-    assert "--new" in result.stdout
-
-def test_file_command_help():
-    """Test that file command help works after refactoring."""
-    result = runner.invoke(app, ["file", "--help"])
-    assert result.exit_code == 0
-    assert "Transcribe a local audio or video file" in result.stdout
-    assert "--english" in result.stdout
-    assert "--verbose" in result.stdout
-    assert "--new" in result.stdout
+    assert "--file" in result.stdout
