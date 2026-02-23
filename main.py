@@ -191,7 +191,7 @@ class PromptManager:
     def add_prompt(self, prompt: str, filename: str) -> None:
         """Add a new prompt to the end of the list."""
         prompt_entry = {
-            "prompt": prompt,
+            "prompt": wrap_text(prompt),
             "filename": filename,
             "timestamp": datetime.datetime.now().isoformat()
         }
@@ -206,7 +206,7 @@ class PromptManager:
 
         console.print("[bold]Stored Prompts:[/bold]")
         for i, prompt in enumerate(self.prompts, 1):
-            console.print(f"\n[cyan]{i}.[/cyan] {wrap_text(prompt['prompt'])}")
+            console.print(f"\n[cyan]{i}.[/cyan] {prompt['prompt']}")
             console.print(f"    [dim]File: {prompt['filename']}[/dim]")
             console.print(f"    [dim]Time: {prompt['timestamp']}[/dim]")
 
@@ -352,11 +352,6 @@ def transcribe_file(file_path: str, stt_model: str, llm_model: str, post_process
         console.print("\n[bold green]Transcription Complete:[/bold green]")
         console.print(final_text)
 
-        final_txt_file = os.path.splitext(file_path)[0] + ".txt"
-        with open(final_txt_file, "w", encoding="utf-8") as f:
-            f.write(f"{final_text.strip()}\n")
-        console.print(f"[blue]Transcription saved to {final_txt_file}[/blue]")
-
         # 3. Post-Processing
         if post_process:
             console.print(f"\n[bold blue]Applying LLM Post-Processing...[/bold blue]")
@@ -375,9 +370,11 @@ def transcribe_file(file_path: str, stt_model: str, llm_model: str, post_process
             console.print("\n[bold green]LLM Result:[/bold green]")
             console.print(llm_result)
 
-            with open(final_txt_file, "w", encoding="utf-8") as f:
-                f.write(f"{llm_result.strip()}\n")
-            console.print(f"[blue]Text file updated with LLM result at {final_txt_file}[/blue]")
+            # Store LLM result in prompt queue
+            prompt_manager.add_prompt(llm_result, file_path)
+        else:
+            # Store raw transcription in prompt queue
+            prompt_manager.add_prompt(final_text, file_path)
 
     except Exception as e:
         console.print(f"[red]An error occurred: {str(e)}[/red]")
@@ -536,15 +533,6 @@ def record_from_microphone(stt_model: str, llm_model: str, post_process: str | N
         console.print("\n[bold green]Transcription Complete:[/bold green]")
         console.print(transcript)
 
-        # Write transcription to a text file next to the mp3
-        final_txt_file = final_mp3_file.replace(".mp3", ".txt") if final_mp3_file.endswith(".mp3") else final_mp3_file + ".txt"
-        with open(final_txt_file, "w", encoding="utf-8") as f:
-            f.write(f"{transcript.strip()}\n")
-        console.print(f"[blue]Transcription saved to {final_txt_file}[/blue]")
-
-        # Store prompt in queue for later retrieval (always save, not just when post_process)
-        prompt_manager.add_prompt(transcript, final_mp3_file)
-
         # Post-Processing
         if post_process:
             console.print(f"\n[bold blue]Applying LLM Post-Processing...[/bold blue]")
@@ -563,10 +551,11 @@ def record_from_microphone(stt_model: str, llm_model: str, post_process: str | N
             console.print("\n[bold green]LLM Result:[/bold green]")
             console.print(llm_result)
 
-            # Write LLM result to the text file instead of the raw transcript
-            with open(final_txt_file, "w", encoding="utf-8") as f:
-                f.write(f"{llm_result.strip()}\n")
-            console.print(f"[blue]Text file updated with LLM result at {final_txt_file}[/blue]")
+            # Store LLM result in prompt queue
+            prompt_manager.add_prompt(llm_result, final_mp3_file)
+        else:
+            # Store raw transcription in prompt queue
+            prompt_manager.add_prompt(transcript, final_mp3_file)
 
     except Exception as e:
         console.print(f"[red]An error occurred: {str(e)}[/red]")
