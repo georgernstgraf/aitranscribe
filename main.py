@@ -16,7 +16,6 @@ from pathlib import Path
 from rich.console import Console
 from rich.progress import Progress, SpinnerColumn, TextColumn
 from dotenv import load_dotenv
-from pynput import keyboard
 from openai import OpenAI
 from core import chunk_audio, transcribe_audio, process_with_llm, compress_audio
 
@@ -406,29 +405,13 @@ def record_from_microphone(stt_model: str, llm_model: str, post_process: str | N
     is_recording = False
     stop_event = False
 
-    def on_press(key) -> None:
-        nonlocal is_recording, stop_event
-        if key == keyboard.Key.space and not is_recording:
-            is_recording = True
-        elif key == keyboard.Key.esc:
-            stop_event = True
-            return False
-
-    def on_release(key) -> None:
-        nonlocal is_recording, stop_event
-        if key == keyboard.Key.space and is_recording:
-            is_recording = False
-            stop_event = True
-            console.print("\n[yellow]⏹ Recording stopped.[/yellow]")
-            return False
-
     console.print("[bold]Push-to-Talk Recording[/bold]")
     console.print(f"STT Model: [cyan]{stt_model}[/cyan]")
     console.print(f"LLM Model: [cyan]{llm_model}[/cyan]")
-    console.print("Press and hold [bold cyan]SPACEBAR[/bold cyan] to record. Release to transcribe. Press ESC to cancel.")
+    console.print("Press [bold cyan]SPACE[/bold cyan] to start recording, [bold cyan]SPACE[/bold cyan] again to stop. Press [bold cyan]q[/bold cyan] to cancel.")
 
-    # Try to disable terminal echo for cleaner UI
-    has_termios = False
+    # Use termios for keyboard input (works without root on Linux)
+    import select
     fd = None
     old_settings = None
     try:
@@ -437,47 +420,63 @@ def record_from_microphone(stt_model: str, llm_model: str, post_process: str | N
         old_settings = termios.tcgetattr(fd)
         new_settings = termios.tcgetattr(fd)
         new_settings[3] = new_settings[3] & ~termios.ECHO
+        new_settings[3] = new_settings[3] & ~termios.ICANON
+        new_settings[6][termios.VMIN] = 0
+        new_settings[6][termios.VTIME] = 0
         termios.tcsetattr(fd, termios.TCSADRAIN, new_settings)
-        has_termios = True
-    except Exception:
-        pass
+    except Exception as e:
+        if verbose:
+            console.print(f"[yellow]Warning: Could not set up termios: {e}[/yellow]")
+        console.print("[red]Error: Could not set up keyboard input. Please ensure you're running in a proper terminal.[/red]")
+        raise typer.Exit(code=1)
 
     try:
-        # We use a listener for the spacebar
-        with keyboard.Listener(on_press=on_press, on_release=on_release) as listener:
-            def callback(indata, frames, cb_time, status):
+        def callback(indata, frames, cb_time, status):
+            if is_recording:
+                audio_data.append(indata.copy())
+
+        with sd.InputStream(samplerate=samplerate, channels=channels, callback=callback):
+            start_time = None
+            last_update = 0.0
+
+            while not stop_event:
+                # Check for keyboard input with timeout
+                if select.select([fd], [], [], 0.01)[0]:
+                    key = sys.stdin.read(1)
+                    if verbose:
+                        console.print(f"[dim]DEBUG: Key pressed: {repr(key)}[/dim]")
+                    
+                    if key == ' ':
+                        if not is_recording:
+                            is_recording = True
+                        else:
+                            is_recording = False
+                            stop_event = True
+                            console.print("\n[yellow]⏹ Recording stopped.[/yellow]")
+                    elif key == 'q' or key == '\x03':  # 'q' or Ctrl+C
+                        if is_recording:
+                            console.print("\n[yellow]Recording cancelled.[/yellow]")
+                        stop_event = True
+                        break
+
                 if is_recording:
-                    audio_data.append(indata.copy())
+                    now = time.time()
+                    if start_time is None:
+                        start_time = now
+                        last_update = start_time
+                        sys.stdout.write("\r\033[K\033[32m⏺ Recording... 0.0s\033[0m")
+                        sys.stdout.flush()
 
-            with sd.InputStream(samplerate=samplerate, channels=channels, callback=callback):
-                start_time = None
-                last_update = 0.0
-
-                while not stop_event:
-                    sd.sleep(100)
-                    if is_recording:
-                        now = time.time()
-                        if start_time is None:
-                            start_time = now
-                            last_update = start_time
-                            sys.stdout.write("\r\033[K\033[32m⏺ Recording... 0.0s\033[0m")
-                            sys.stdout.flush()
-
-                        # Actively backspace if OS key-repeat prints spaces
-                        if not has_termios:
-                            sys.stdout.write('\b \b' * 10)
-                            sys.stdout.flush()
-
-                        if now - last_update >= update_interval:
-                            duration = now - start_time
-                            sys.stdout.write(f"\r\033[K\033[32m⏺ Recording... {duration:.1f}s\033[0m")
-                            sys.stdout.flush()
-                            last_update = now
-                    else:
-                        start_time = None
+                    if now - last_update >= update_interval:
+                        duration = now - start_time
+                        sys.stdout.write(f"\r\033[K\033[32m⏺ Recording... {duration:.1f}s\033[0m")
+                        sys.stdout.flush()
+                        last_update = now
+                else:
+                    start_time = None
     finally:
-        # Restore terminal echo
-        if has_termios and fd is not None and old_settings is not None:
+        # Restore terminal settings
+        if fd is not None and old_settings is not None:
             try:
                 import termios
                 termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
