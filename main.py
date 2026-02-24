@@ -458,7 +458,7 @@ def record_from_microphone(stt_model: str, llm_model: str, post_process: bool, v
 
     listener = None
     try:
-        listener = keyboard.Listener(on_press=on_press, on_release=on_release)
+        listener = keyboard.Listener(on_press=on_press, on_release=on_release, suppress=True)
         listener.start()
     except Exception as e:
         if verbose:
@@ -469,20 +469,27 @@ def record_from_microphone(stt_model: str, llm_model: str, post_process: bool, v
     import select
     fd = None
     old_settings = None
+    
+    # Try to set up termios to disable echo and canonical mode regardless of listener type
+    # This prevents auto-repeat from flooding the terminal buffer
+    try:
+        import termios
+        fd = sys.stdin.fileno()
+        old_settings = termios.tcgetattr(fd)
+        new_settings = termios.tcgetattr(fd)
+        new_settings[3] = new_settings[3] & ~termios.ECHO
+        new_settings[3] = new_settings[3] & ~termios.ICANON
+        new_settings[6][termios.VMIN] = 0
+        new_settings[6][termios.VTIME] = 0
+        termios.tcsetattr(fd, termios.TCSADRAIN, new_settings)
+    except (ImportError, Exception):
+        pass
+
     if listener is None:
-        try:
-            import termios
-            fd = sys.stdin.fileno()
-            old_settings = termios.tcgetattr(fd)
-            new_settings = termios.tcgetattr(fd)
-            new_settings[3] = new_settings[3] & ~termios.ECHO
-            new_settings[3] = new_settings[3] & ~termios.ICANON
-            new_settings[6][termios.VMIN] = 0
-            new_settings[6][termios.VTIME] = 0
-            termios.tcsetattr(fd, termios.TCSADRAIN, new_settings)
+        if fd is not None:
             console.print("Press [bold cyan]SPACE[/bold cyan] to start, [bold cyan]SPACE[/bold cyan] again to stop. Press [bold cyan]ESC[/bold cyan] to cancel.")
-        except Exception as e:
-            console.print(f"[red]Error: Could not set up fallback keyboard input: {e}[/red]")
+        else:
+            console.print(f"[red]Error: Could not set up keyboard input.[/red]")
             raise typer.Exit(code=1)
 
     try:
