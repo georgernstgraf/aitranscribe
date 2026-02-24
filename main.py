@@ -103,9 +103,6 @@ def query_prompt_option():
 def file_path_argument():
     return typer.Argument("/tmp/aitranscribe_record.mp3", help="Path to audio or video file")
 
-def update_interval_option():
-    return typer.Option(1, help="Duration update interval in seconds")
-
 # Logic Helper Functions
 def apply_english_translation(post_process: str | None) -> str | None:
     if post_process:
@@ -244,7 +241,6 @@ def main(
     post_process: str | None = post_process_option(),
     stt_model: str = stt_model_option(),
     verbose: bool = verbose_option(),
-    update_interval: float = update_interval_option(),
     help: bool = help_option(),
 ):
     """
@@ -274,7 +270,7 @@ def main(
     if file:
         transcribe_file(file, stt_model, llm_model, post_process, verbose, english, new)
     else:
-        record_from_microphone(stt_model, llm_model, post_process, verbose, english, new, update_interval)
+        record_from_microphone(stt_model, llm_model, post_process, verbose, english, new)
 
 def transcribe_file(file_path: str, stt_model: str, llm_model: str, post_process: str | None, verbose: bool, english: bool, new: bool):
     """Transcribe a local audio or video file using Groq STT and optionally process with OpenRouter LLM."""
@@ -382,7 +378,7 @@ def transcribe_file(file_path: str, stt_model: str, llm_model: str, post_process
             console.print_exception()
         raise typer.Exit(code=1)
 
-def record_from_microphone(stt_model: str, llm_model: str, post_process: str | None, verbose: bool, english: bool, new: bool, update_interval: float):
+def record_from_microphone(stt_model: str, llm_model: str, post_process: str | None, verbose: bool, english: bool, new: bool):
     """Record audio from microphone (Push-to-Talk) and transcribe it using Groq."""
     if verbose:
         state["verbose"] = True
@@ -464,7 +460,7 @@ def record_from_microphone(stt_model: str, llm_model: str, post_process: str | N
                         sys.stdout.write("\r\033[K\033[32m⏺ Recording... 0.0s\033[0m")
                         sys.stdout.flush()
 
-                    if now - last_update >= update_interval:
+                    if now - last_update >= 1.0:
                         duration = now - start_time
                         sys.stdout.write(f"\r\033[K\033[32m⏺ Recording... {duration:.1f}s\033[0m")
                         sys.stdout.flush()
