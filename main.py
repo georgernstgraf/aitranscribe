@@ -9,10 +9,10 @@ import soundfile as sf
 import numpy as np
 import tempfile
 import glob
-import subprocess
 import json
 import datetime
 from pathlib import Path
+from typing import Any
 from rich.console import Console
 from rich.progress import Progress, SpinnerColumn, TextColumn
 from dotenv import load_dotenv
@@ -424,9 +424,6 @@ def record_from_microphone(stt_model: str, llm_model: str, post_process: bool, v
     channels = 1
     audio_data = []
 
-    is_recording = False
-    stop_event = False
-
     console.print("[bold]Push-to-Talk Recording[/bold]")
     console.print(f"STT Model: [cyan]{stt_model}[/cyan]")
     console.print(f"LLM Model: [cyan]{llm_model}[/cyan]")
@@ -439,7 +436,7 @@ def record_from_microphone(stt_model: str, llm_model: str, post_process: bool, v
         "cancelled": False
     }
 
-    def on_press(key: keyboard.Key | keyboard.KeyCode | None) -> bool | None:
+    def on_press(key: keyboard.Key | keyboard.KeyCode | None) -> Any:
         if key == keyboard.Key.space:
             if not recording_state["is_recording"]:
                 recording_state["is_recording"] = True
@@ -450,7 +447,7 @@ def record_from_microphone(stt_model: str, llm_model: str, post_process: bool, v
             return False
         return None
 
-    def on_release(key: keyboard.Key | keyboard.KeyCode | None) -> bool | None:
+    def on_release(key: keyboard.Key | keyboard.KeyCode | None) -> Any:
         if key == keyboard.Key.space:
             if recording_state["is_recording"]:
                 recording_state["is_recording"] = False
@@ -460,7 +457,7 @@ def record_from_microphone(stt_model: str, llm_model: str, post_process: bool, v
 
     listener = None
     try:
-        listener = keyboard.Listener(on_press=on_press, on_release=on_release, suppress=True)
+        listener = keyboard.Listener(on_press=on_press, on_release=on_release, suppress=True)  # type: ignore
         listener.start()
     except Exception as e:
         if verbose:
