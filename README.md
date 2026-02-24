@@ -16,8 +16,7 @@ A powerful CLI tool for audio transcription and LLM post-processing, powered by 
 * **CLI Framework:** [Typer](https://typer.tiangolo.com/) for a modern, clean command-line interface.
 * **UI/Output:** [Rich](https://rich.readthedocs.io/) for beautiful console output, progress bars, and Markdown rendering.
 * **Audio Processing:** [pydub](https://github.com/jiaaro/pydub) for handling various audio formats and chunking large files.
-* **Microphone Capture:** `sounddevice`, `soundfile`, and `pynput` for cross-platform push-to-talk recording.
-* **API Client:** The official `openai` Python SDK (configured for Groq and OpenRouter).
+* **Microphone Capture:** `sounddevice`, `soundfile`, and `pynput` for cross-platform push-to-talk recording (supports Windows via `msvcrt` fallback).
 
 ## 📋 Prerequisites
 
@@ -27,7 +26,7 @@ Before you begin, ensure you have the following installed on your system:
 2. **FFmpeg:** Required by `pydub` to manipulate non-WAV audio formats (like MP3 or MP4).
     * **macOS:** `brew install ffmpeg`
     * **Linux (Ubuntu/Debian):** `sudo apt install ffmpeg`
-    * **Windows:** `winget install ffmpeg` or download from the official site.
+    * **Windows:** `winget install ffmpeg` or download from [ffmpeg.org](https://ffmpeg.org/download.html).
 
 ## 💻 Installation
 
@@ -42,7 +41,10 @@ Before you begin, ensure you have the following installed on your system:
 
     ```bash
     python -m venv venv
-    source venv/bin/activate  # On Windows use `venv\Scripts\activate`
+    # Linux/macOS:
+    source venv/bin/activate
+    # Windows:
+    venv\Scripts\activate
     ```
 
 3. Install the dependencies:
@@ -51,16 +53,25 @@ Before you begin, ensure you have the following installed on your system:
     pip install -r requirements.txt
     ```
 
-4. Make the wrapper script executable and symlink it to your path so you can use it globally from anywhere:
+4. Make the tool globally accessible:
 
+    **Linux/macOS:**
     ```bash
     chmod +x aitranscribe
     sudo ln -s "$(pwd)/aitranscribe" /usr/local/bin/aitranscribe
     ```
 
+    **Windows:**
+    Add the repository directory to your system's **PATH** environment variable. The `aitranscribe.bat` wrapper will handle execution.
+
 ## ⚙️ Configuration
 
-`aitranscribe` uses a global configuration file located at `~/.config/aitranscribe/config`. On the first run, the tool will automatically create a template for you.
+`aitranscribe` uses a global configuration file:
+* **Linux/macOS:** `~/.config/aitranscribe/config`
+* **Windows:** `%APPDATA%\aitranscribe\config`
+
+On the first run, the tool will automatically create a template for you.
+
 
 1. Open the file using your favorite editor:
 

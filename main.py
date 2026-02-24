@@ -24,7 +24,17 @@ console = Console()
 state = {"verbose": False}
 
 # Configuration Directory
-CONFIG_DIR = Path.home() / ".config" / "aitranscribe"
+if os.name == 'nt':
+    # Windows: %APPDATA%\aitranscribe
+    appdata = os.getenv('APPDATA')
+    if appdata:
+        CONFIG_DIR = Path(appdata) / "aitranscribe"
+    else:
+        CONFIG_DIR = Path.home() / "AppData" / "Roaming" / "aitranscribe"
+else:
+    # Linux/macOS: ~/.config/aitranscribe
+    CONFIG_DIR = Path.home() / ".config" / "aitranscribe"
+
 CONFIG_FILE = CONFIG_DIR / "config"
 PROMPTS_FILE = CONFIG_DIR / "prompts.json"
 
@@ -463,29 +473,30 @@ def record_from_microphone(stt_model: str, llm_model: str, post_process: bool, v
         if verbose:
             console.print(f"[yellow]Warning: Could not start pynput listener: {e}[/yellow]")
         console.print("[yellow]Falling back to toggle-mode recording (press SPACE to start/stop).[/yellow]")
-        # Fallback to termios handled below by checking if listener is None
+        # Fallback to termios/msvcrt handled below by checking if listener is None
 
-    import select
     fd = None
     old_settings = None
     
-    # Try to set up termios to disable echo and canonical mode regardless of listener type
+    # Try to set up terminal to disable echo and canonical mode regardless of listener type
     # This prevents auto-repeat from flooding the terminal buffer
-    try:
-        import termios
-        fd = sys.stdin.fileno()
-        old_settings = termios.tcgetattr(fd)
-        new_settings = termios.tcgetattr(fd)
-        new_settings[3] = new_settings[3] & ~termios.ECHO
-        new_settings[3] = new_settings[3] & ~termios.ICANON
-        new_settings[6][termios.VMIN] = 0
-        new_settings[6][termios.VTIME] = 0
-        termios.tcsetattr(fd, termios.TCSADRAIN, new_settings)
-    except (ImportError, Exception):
-        pass
+    if os.name != 'nt':
+        try:
+            import termios
+            fd = sys.stdin.fileno()
+            old_settings = termios.tcgetattr(fd)
+            new_settings = termios.tcgetattr(fd)
+            new_settings[3] = new_settings[3] & ~termios.ECHO
+            new_settings[3] = new_settings[3] & ~termios.ICANON
+            new_settings[6][termios.VMIN] = 0
+            new_settings[6][termios.VTIME] = 0
+            termios.tcsetattr(fd, termios.TCSADRAIN, new_settings)
+        except (ImportError, Exception):
+            pass
 
     if listener is None:
-        if fd is not None:
+        # Check if we can at least use msvcrt (Windows) or termios (Unix)
+        if os.name == 'nt' or fd is not None:
             console.print("Press [bold cyan]SPACE[/bold cyan] to start, [bold cyan]SPACE[/bold cyan] again to stop. Press [bold cyan]ESC[/bold cyan] to cancel.")
         else:
             console.print(f"[red]Error: Could not set up keyboard input.[/red]")
@@ -513,19 +524,32 @@ def record_from_microphone(stt_model: str, llm_model: str, post_process: bool, v
                     break
                 
                 # Check for fallback keyboard input
-                if listener is None and fd is not None:
-                    if select.select([fd], [], [], 0.01)[0]:
-                        key = sys.stdin.read(1)
-                        if key == ' ':
-                            if not recording_state["is_recording"]:
-                                recording_state["is_recording"] = True
-                            else:
-                                recording_state["is_recording"] = False
-                                recording_state["stop_event"] = True
-                        elif key == '\x1b' or key == '\x03':
+                if listener is None:
+                    key = None
+                    if os.name == 'nt':
+                        import msvcrt
+                        if msvcrt.kbhit():
+                            char = msvcrt.getch()
+                            # Handle ESC (27) or Space (32)
+                            if char == b' ':
+                                key = ' '
+                            elif char == b'\x1b':
+                                key = '\x1b'
+                    else:
+                        import select
+                        if fd is not None and select.select([fd], [], [], 0.01)[0]:
+                            key = sys.stdin.read(1)
+
+                    if key == ' ':
+                        if not recording_state["is_recording"]:
+                            recording_state["is_recording"] = True
+                        else:
+                            recording_state["is_recording"] = False
                             recording_state["stop_event"] = True
-                            recording_state["cancelled"] = True
-                            break
+                    elif key == '\x1b' or key == '\x03':
+                        recording_state["stop_event"] = True
+                        recording_state["cancelled"] = True
+                        break
 
                 if recording_state["is_recording"]:
                     now = time.time()
@@ -561,11 +585,20 @@ def record_from_microphone(stt_model: str, llm_model: str, post_process: bool, v
         if listener is not None and listener.is_alive():
             listener.stop()
         # Restore terminal settings
-        if fd is not None and old_settings is not None:
+        if os.name != 'nt':
+            if fd is not None and old_settings is not None:
+                try:
+                    import termios
+                    termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
+                    termios.tcflush(fd, termios.TCIFLUSH)
+                except Exception:
+                    pass
+        else:
+            # Windows: Flush input buffer
             try:
-                import termios
-                termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
-                termios.tcflush(fd, termios.TCIFLUSH)
+                import msvcrt
+                while msvcrt.kbhit():
+                    msvcrt.getch()
             except Exception:
                 pass
 
