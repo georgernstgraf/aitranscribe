@@ -439,7 +439,7 @@ def record_from_microphone(stt_model: str, llm_model: str, post_process: bool, v
         "cancelled": False
     }
 
-    def on_press(key):
+    def on_press(key: keyboard.Key | keyboard.KeyCode | None) -> bool | None:
         if key == keyboard.Key.space:
             if not recording_state["is_recording"]:
                 recording_state["is_recording"] = True
@@ -448,13 +448,15 @@ def record_from_microphone(stt_model: str, llm_model: str, post_process: bool, v
             recording_state["stop_event"] = True
             recording_state["cancelled"] = True
             return False
+        return None
 
-    def on_release(key):
+    def on_release(key: keyboard.Key | keyboard.KeyCode | None) -> bool | None:
         if key == keyboard.Key.space:
             if recording_state["is_recording"]:
                 recording_state["is_recording"] = False
                 recording_state["stop_event"] = True
                 return False
+        return None
 
     listener = None
     try:
