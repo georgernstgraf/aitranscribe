@@ -60,3 +60,4 @@
 ## 6. IMPORTANT NOTES
 
 * **Testing main.py:** When running `main.py` without command or with `record` command (for testing purposes), you need to press ESC to stop the recording process.
+* **Running Tests:** Execute tests using the project's virtual environment: `./venv/bin/pytest tests/test_cli.py` or simply `pytest` if the environment is active.
