@@ -17,6 +17,7 @@ from rich.console import Console
 from rich.progress import Progress, SpinnerColumn, TextColumn
 from dotenv import load_dotenv
 from openai import OpenAI
+from pynput import keyboard
 from core import chunk_audio, transcribe_audio, process_with_llm, compress_audio
 
 console = Console()
@@ -424,58 +425,94 @@ def record_from_microphone(stt_model: str, llm_model: str, post_process: str | N
     console.print("[bold]Push-to-Talk Recording[/bold]")
     console.print(f"STT Model: [cyan]{stt_model}[/cyan]")
     console.print(f"LLM Model: [cyan]{llm_model}[/cyan]")
-    console.print("Press [bold cyan]SPACE[/bold cyan] to start recording, [bold cyan]SPACE[/bold cyan] again to stop. Press [bold cyan]q[/bold cyan] to cancel.")
+    console.print("Hold [bold cyan]SPACE[/bold cyan] to record. Release to stop. Press [bold cyan]q[/bold cyan] to cancel.")
 
-    # Use termios for keyboard input (works without root on Linux)
+    # Shared state for the listener
+    recording_state = {
+        "is_recording": False,
+        "stop_event": False,
+        "cancelled": False
+    }
+
+    def on_press(key):
+        if key == keyboard.Key.space:
+            if not recording_state["is_recording"]:
+                recording_state["is_recording"] = True
+                # UI is handled in the main loop
+        elif hasattr(key, 'char') and key.char == 'q':
+            recording_state["stop_event"] = True
+            recording_state["cancelled"] = True
+            return False
+
+    def on_release(key):
+        if key == keyboard.Key.space:
+            if recording_state["is_recording"]:
+                recording_state["is_recording"] = False
+                recording_state["stop_event"] = True
+                return False
+
+    listener = None
+    try:
+        listener = keyboard.Listener(on_press=on_press, on_release=on_release)
+        listener.start()
+    except Exception as e:
+        if verbose:
+            console.print(f"[yellow]Warning: Could not start pynput listener: {e}[/yellow]")
+        console.print("[yellow]Falling back to toggle-mode recording (press SPACE to start/stop).[/yellow]")
+        # Fallback to termios handled below by checking if listener is None
+
     import select
     fd = None
     old_settings = None
-    try:
-        import termios
-        fd = sys.stdin.fileno()
-        old_settings = termios.tcgetattr(fd)
-        new_settings = termios.tcgetattr(fd)
-        new_settings[3] = new_settings[3] & ~termios.ECHO
-        new_settings[3] = new_settings[3] & ~termios.ICANON
-        new_settings[6][termios.VMIN] = 0
-        new_settings[6][termios.VTIME] = 0
-        termios.tcsetattr(fd, termios.TCSADRAIN, new_settings)
-    except Exception as e:
-        if verbose:
-            console.print(f"[yellow]Warning: Could not set up termios: {e}[/yellow]")
-        console.print("[red]Error: Could not set up keyboard input. Please ensure you're running in a proper terminal.[/red]")
-        raise typer.Exit(code=1)
+    if listener is None:
+        try:
+            import termios
+            fd = sys.stdin.fileno()
+            old_settings = termios.tcgetattr(fd)
+            new_settings = termios.tcgetattr(fd)
+            new_settings[3] = new_settings[3] & ~termios.ECHO
+            new_settings[3] = new_settings[3] & ~termios.ICANON
+            new_settings[6][termios.VMIN] = 0
+            new_settings[6][termios.VTIME] = 0
+            termios.tcsetattr(fd, termios.TCSADRAIN, new_settings)
+            console.print("Press [bold cyan]SPACE[/bold cyan] to start, [bold cyan]SPACE[/bold cyan] again to stop.")
+        except Exception as e:
+            console.print(f"[red]Error: Could not set up fallback keyboard input: {e}[/red]")
+            raise typer.Exit(code=1)
 
     try:
         def callback(indata, frames, cb_time, status):
-            if is_recording:
+            if recording_state["is_recording"]:
                 audio_data.append(indata.copy())
 
         with sd.InputStream(samplerate=samplerate, channels=channels, callback=callback):
             start_time = None
             last_update = 0.0
+            total_start_time = time.time()
+            timeout = 300 # 5 minutes total session timeout as safety
 
-            while not stop_event:
-                # Check for keyboard input with timeout
-                if select.select([fd], [], [], 0.01)[0]:
-                    key = sys.stdin.read(1)
-                    if verbose:
-                        console.print(f"[dim]DEBUG: Key pressed: {repr(key)}[/dim]")
-                    
-                    if key == ' ':
-                        if not is_recording:
-                            is_recording = True
-                        else:
-                            is_recording = False
-                            stop_event = True
-                            console.print("\n[yellow]⏹ Recording stopped.[/yellow]")
-                    elif key == 'q' or key == '\x03':  # 'q' or Ctrl+C
-                        if is_recording:
-                            console.print("\n[yellow]Recording cancelled.[/yellow]")
-                        stop_event = True
-                        break
+            while not recording_state["stop_event"]:
+                if time.time() - total_start_time > timeout:
+                    console.print("\n[red]Recording session timed out.[/red]")
+                    recording_state["stop_event"] = True
+                    break
+                
+                # Check for fallback keyboard input
+                if listener is None and fd is not None:
+                    if select.select([fd], [], [], 0.01)[0]:
+                        key = sys.stdin.read(1)
+                        if key == ' ':
+                            if not recording_state["is_recording"]:
+                                recording_state["is_recording"] = True
+                            else:
+                                recording_state["is_recording"] = False
+                                recording_state["stop_event"] = True
+                        elif key == 'q' or key == '\x03':
+                            recording_state["stop_event"] = True
+                            recording_state["cancelled"] = True
+                            break
 
-                if is_recording:
+                if recording_state["is_recording"]:
                     now = time.time()
                     if start_time is None:
                         start_time = now
@@ -483,14 +520,28 @@ def record_from_microphone(stt_model: str, llm_model: str, post_process: str | N
                         sys.stdout.write("\r\033[K\033[32m⏺ Recording... 0.0s\033[0m")
                         sys.stdout.flush()
 
-                    if now - last_update >= 1.0:
+                    if now - last_update >= 0.1: # Faster updates for smoother UI
                         duration = now - start_time
                         sys.stdout.write(f"\r\033[K\033[32m⏺ Recording... {duration:.1f}s\033[0m")
                         sys.stdout.flush()
                         last_update = now
                 else:
-                    start_time = None
+                    if start_time is not None:
+                        # Transition from recording to stopped
+                        sys.stdout.write("\n[yellow]⏹ Recording stopped.[/yellow]\n")
+                        sys.stdout.flush()
+                        start_time = None
+                
+                time.sleep(0.05)
+
+            if recording_state["cancelled"]:
+                if recording_state["is_recording"]:
+                    console.print("\n[yellow]Recording cancelled.[/yellow]")
+                return
+
     finally:
+        if listener is not None and listener.is_alive():
+            listener.stop()
         # Restore terminal settings
         if fd is not None and old_settings is not None:
             try:
@@ -547,6 +598,7 @@ def record_from_microphone(stt_model: str, llm_model: str, post_process: str | N
             console.print(f"[blue]Audio saved to {final_mp3_file}[/blue]")
 
             progress.add_task(description="Transcribing audio...", total=None)
+            assert stt_client is not None
             transcript = transcribe_audio(stt_client, final_mp3_file, stt_model)
 
         console.print("\n[bold green]Transcription Complete:[/bold green]")
