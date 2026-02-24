@@ -72,7 +72,7 @@ llm_client = OpenAI(
 
 # Option Factory Functions
 def post_process_option():
-    return typer.Option(None, "--post-process", "-p", help="Prompt for LLM post-processing. Use without arg for default formatting")
+    return typer.Option(False, "--post-process", "-p", help="Refine text: correct grammar, remove fillers, and structure clearly")
 
 def stt_model_option():
     return typer.Option(GROQ_STT_MODEL, help="Groq STT model to use")
@@ -108,10 +108,12 @@ def file_path_argument():
     return typer.Argument("/tmp/aitranscribe_record.mp3", help="Path to audio or video file")
 
 # Logic Helper Functions
-def apply_english_translation(post_process: str | None) -> str | None:
+def get_post_process_prompt(english: bool, post_process: bool) -> str | None:
+    if english:
+        return "Please translate the following text to English, correct grammatical errors, remove filler words, and structure it clearly."
     if post_process:
-        return f"Please translate the following text to English, and also follow these instructions: {post_process}"
-    return "Please translate the following text to English, correct grammatical errors, remove filler words, and structure it clearly."
+        return "Please correct grammatical errors, remove filler words, and structure the following text."
+    return None
 
 def cleanup_old_records() -> int:
     temp_dir = tempfile.gettempdir()
@@ -258,7 +260,7 @@ def main(
     english: bool = english_option(),
     llm_model: str = llm_model_option(),
     new: bool = new_option(),
-    post_process: str | None = post_process_option(),
+    post_process: bool = post_process_option(),
     stt_model: str = stt_model_option(),
     verbose: bool = verbose_option(),
     help: bool = help_option(),
@@ -275,6 +277,11 @@ def main(
         return
 
     state["verbose"] = verbose
+
+    # Enforce mutual exclusivity between --english and --post-process
+    if english and post_process:
+        console.print("[red]Error: Options --english and --post-process are mutually exclusive.[/red]")
+        raise typer.Exit(code=1)
 
     # Handle prompt management commands
     if list_prompts:
@@ -296,18 +303,17 @@ def main(
     else:
         record_from_microphone(stt_model, llm_model, post_process, verbose, english, new)
 
-def transcribe_file(file_path: str, stt_model: str, llm_model: str, post_process: str | None, verbose: bool, english: bool, new: bool):
+def transcribe_file(file_path: str, stt_model: str, llm_model: str, post_process: bool, verbose: bool, english: bool, new: bool):
     """Transcribe a local audio or video file using Groq STT and optionally process with OpenRouter LLM."""
     if verbose:
         state["verbose"] = True
 
-    if english:
-        post_process = apply_english_translation(post_process)
+    prompt = get_post_process_prompt(english, post_process)
 
     if new:
         cleanup_old_records()
 
-    validate_api_keys(post_process)
+    validate_api_keys(prompt)
 
     console.print(f"[blue]Preparing to transcribe file: {file_path}[/blue]")
     console.print(f"STT Model: [cyan]{stt_model}[/cyan]")
@@ -373,9 +379,9 @@ def transcribe_file(file_path: str, stt_model: str, llm_model: str, post_process
         console.print(final_text)
 
         # 3. Post-Processing
-        if post_process:
+        if prompt:
             console.print(f"\n[bold blue]Applying LLM Post-Processing...[/bold blue]")
-            console.print(f"Prompt: [magenta]{post_process}[/magenta]")
+            console.print(f"Prompt: [magenta]{prompt}[/magenta]")
             console.print(f"Model: [cyan]{llm_model}[/cyan]")
 
             with Progress(
@@ -385,7 +391,7 @@ def transcribe_file(file_path: str, stt_model: str, llm_model: str, post_process
             ) as progress:
                 progress.add_task(description="Processing with LLM...", total=None)
                 assert llm_client is not None
-                llm_result = process_with_llm(llm_client, final_text, post_process, llm_model)
+                llm_result = process_with_llm(llm_client, final_text, prompt, llm_model)
 
             console.print("\n[bold green]LLM Result:[/bold green]")
             console.print(llm_result)
@@ -402,18 +408,17 @@ def transcribe_file(file_path: str, stt_model: str, llm_model: str, post_process
             console.print_exception()
         raise typer.Exit(code=1)
 
-def record_from_microphone(stt_model: str, llm_model: str, post_process: str | None, verbose: bool, english: bool, new: bool):
+def record_from_microphone(stt_model: str, llm_model: str, post_process: bool, verbose: bool, english: bool, new: bool):
     """Record audio from microphone (Push-to-Talk) and transcribe it using Groq."""
     if verbose:
         state["verbose"] = True
 
-    if english:
-        post_process = apply_english_translation(post_process)
+    prompt = get_post_process_prompt(english, post_process)
 
     if new:
         cleanup_old_records()
 
-    validate_api_keys(post_process)
+    validate_api_keys(prompt)
 
     samplerate = 44100
     channels = 1
@@ -612,9 +617,9 @@ def record_from_microphone(stt_model: str, llm_model: str, post_process: str | N
         console.print(transcript)
 
         # Post-Processing
-        if post_process:
+        if prompt:
             console.print(f"\n[bold blue]Applying LLM Post-Processing...[/bold blue]")
-            console.print(f"Prompt: [magenta]{post_process}[/magenta]")
+            console.print(f"Prompt: [magenta]{prompt}[/magenta]")
             console.print(f"Model: [cyan]{llm_model}[/cyan]")
 
             with Progress(
@@ -624,7 +629,7 @@ def record_from_microphone(stt_model: str, llm_model: str, post_process: str | N
             ) as progress:
                 progress.add_task(description="Processing with LLM...", total=None)
                 assert llm_client is not None
-                llm_result = process_with_llm(llm_client, transcript, post_process, llm_model)
+                llm_result = process_with_llm(llm_client, transcript, prompt, llm_model)
 
             console.print("\n[bold green]LLM Result:[/bold green]")
             console.print(llm_result)

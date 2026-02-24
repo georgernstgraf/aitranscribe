@@ -26,7 +26,7 @@ try:
         list_prompts_option,
         query_prompt_option,
         remove_prompt_option,
-        apply_english_translation,
+        get_post_process_prompt,
         cleanup_old_records,
         validate_api_keys,
         wrap_text,
@@ -121,22 +121,22 @@ def test_remove_prompt_option():
 
 # ==================== Logic Helper Tests ====================
 
-def test_apply_english_translation_with_existing_prompt():
-    """Test that English translation is appended to existing prompt."""
-    existing_prompt = "Fix the grammar."
-    result = apply_english_translation(existing_prompt)
-    assert result is not None
-    assert "Please translate the following text to English" in result
-    assert "Fix the grammar." in result
-
-def test_apply_english_translation_without_existing_prompt():
-    """Test that English translation prompt is created when none exists."""
-    result = apply_english_translation(None)
+def test_get_post_process_prompt_english_only():
+    """Test English translation prompt."""
+    result = get_post_process_prompt(english=True, post_process=False)
     assert result is not None
     assert "Please translate the following text to English" in result
     assert "correct grammatical errors" in result
-    assert "remove filler words" in result
-    assert "structure it clearly" in result
+
+def test_get_post_process_prompt_post_process_only():
+    """Test default post-processing prompt."""
+    result = get_post_process_prompt(english=False, post_process=True)
+    assert result == "Please correct grammatical errors, remove filler words, and structure the following text."
+
+def test_get_post_process_prompt_none():
+    """Test no post-processing."""
+    result = get_post_process_prompt(english=False, post_process=False)
+    assert result is None
 
 def test_cleanup_old_records():
     """Test that cleanup_old_records deletes matching files."""
@@ -251,6 +251,12 @@ def test_cli_remove_prompt_invalid_index():
     result = runner.invoke(app, ["--remove", "999"])
     assert result.exit_code == 0
     assert "Invalid index" in result.stdout or "No prompts to remove" in result.stdout
+
+def test_cli_mutually_exclusive_options():
+    """Test that --english and --post-process are mutually exclusive."""
+    result = runner.invoke(app, ["-e", "-p"])
+    assert result.exit_code == 1
+    assert "mutually exclusive" in result.stdout
 
 # ==================== PromptManager Unit Tests ====================
 
