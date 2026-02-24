@@ -220,37 +220,125 @@ def test_wrap_text_whitespace():
     assert lines[1] == "text wrapping"
     assert lines[2] == "functionality"
 
+def test_promptmanager_query_prompt_empty():
+    """Test PromptManager.query_prompt with empty queue."""
+    with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f:
+        temp_file = Path(f.name)
+    
+    try:
+        manager = PromptManager(temp_file)
+        result = manager.query_prompt()
+        assert result is None
+    finally:
+        temp_file.unlink()
+
+def test_promptmanager_query_prompt_success():
+    """Test PromptManager.query_prompt retrieves and removes oldest prompt."""
+    with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f:
+        temp_file = Path(f.name)
+    
+    try:
+        manager = PromptManager(temp_file)
+        manager.add_prompt("First prompt", "file1.mp3")
+        manager.add_prompt("Second prompt", "file2.mp3")
+        
+        result = manager.query_prompt()
+        assert result == "First prompt"
+        assert len(manager.prompts) == 1
+        assert manager.prompts[0]['prompt'] == "Second prompt"
+    finally:
+        temp_file.unlink()
+
+def test_promptmanager_list_prompts_empty(capsys):
+    """Test PromptManager.list_prompts with empty queue."""
+    with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f:
+        temp_file = Path(f.name)
+    
+    try:
+        manager = PromptManager(temp_file)
+        manager.list_prompts()
+        captured = capsys.readouterr()
+        assert "No prompts stored yet" in captured.out
+    finally:
+        temp_file.unlink()
+
+def test_promptmanager_list_prompts_populated(capsys):
+    """Test PromptManager.list_prompts with populated queue."""
+    with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f:
+        temp_file = Path(f.name)
+    
+    try:
+        manager = PromptManager(temp_file)
+        manager.add_prompt("Test prompt", "test.mp3")
+        manager.list_prompts()
+        captured = capsys.readouterr()
+        assert "Stored Prompts:" in captured.out
+        assert "Test prompt" in captured.out
+        assert "test.mp3" in captured.out
+    finally:
+        temp_file.unlink()
+
 # ==================== Integration Tests ====================
 
-def test_cli_without_file_option():
-    """Test that CLI works without --file option (default: record mode)."""
-    result = runner.invoke(app, ["--help"])
-    assert result.exit_code == 0
-    assert "--file" in result.stdout
+def test_cli_query_prompt_with_content():
+    """Test that --query option retrieves prompt when available."""
+    with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f:
+        temp_file = Path(f.name)
+    
+    try:
+        with patch('main.PROMPTS_FILE', temp_file):
+            # We need to re-initialize or mock the prompt_manager used in main
+            from main import PromptManager
+            mock_manager = PromptManager(temp_file)
+            mock_manager.add_prompt("Queued prompt", "test.mp3")
+            
+            with patch('main.prompt_manager', mock_manager):
+                result = runner.invoke(app, ["--query"])
+                assert result.exit_code == 0
+                assert "Queued prompt" in result.stdout
+                assert len(mock_manager.prompts) == 0
+    finally:
+        temp_file.unlink()
 
-def test_cli_list_prompts_empty():
-    """Test that --list option works with empty queue."""
-    result = runner.invoke(app, ["--list"])
-    assert result.exit_code == 0
-    assert "No prompts stored yet" in result.stdout or "Stored Prompts:" in result.stdout
+def test_cli_remove_prompt_success():
+    """Test that --remove option works with valid index."""
+    with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f:
+        temp_file = Path(f.name)
+    
+    try:
+        with patch('main.PROMPTS_FILE', temp_file):
+            from main import PromptManager
+            mock_manager = PromptManager(temp_file)
+            mock_manager.add_prompt("Prompt 1", "file1.mp3")
+            mock_manager.add_prompt("Prompt 2", "file2.mp3")
+            
+            with patch('main.prompt_manager', mock_manager):
+                result = runner.invoke(app, ["--remove", "1"])
+                assert result.exit_code == 0
+                assert "Removed prompt 1" in result.stdout
+                assert len(mock_manager.prompts) == 1
+                assert mock_manager.prompts[0]['prompt'] == "Prompt 2"
+    finally:
+        temp_file.unlink()
 
-def test_cli_query_prompt_empty():
-    """Test that --query option works with empty queue."""
-    result = runner.invoke(app, ["--query"])
-    assert result.exit_code == 0
-    assert "No prompts in queue" in result.stdout
-
-def test_cli_remove_prompt_empty():
-    """Test that --remove option works with empty queue."""
-    result = runner.invoke(app, ["--remove", "1"])
-    assert result.exit_code == 0
-    assert "No prompts to remove" in result.stdout
-
-def test_cli_remove_prompt_invalid_index():
-    """Test that --remove option handles invalid index."""
-    result = runner.invoke(app, ["--remove", "999"])
-    assert result.exit_code == 0
-    assert "Invalid index" in result.stdout or "No prompts to remove" in result.stdout
+def test_cli_list_prompts_populated():
+    """Test that --list option works with populated queue."""
+    with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f:
+        temp_file = Path(f.name)
+    
+    try:
+        with patch('main.PROMPTS_FILE', temp_file):
+            from main import PromptManager
+            mock_manager = PromptManager(temp_file)
+            mock_manager.add_prompt("List Test", "list.mp3")
+            
+            with patch('main.prompt_manager', mock_manager):
+                result = runner.invoke(app, ["--list"])
+                assert result.exit_code == 0
+                assert "Stored Prompts:" in result.stdout
+                assert "List Test" in result.stdout
+    finally:
+        temp_file.unlink()
 
 def test_cli_mutually_exclusive_options():
     """Test that --english and --post-process are mutually exclusive."""

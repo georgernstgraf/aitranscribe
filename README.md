@@ -4,10 +4,11 @@ A powerful CLI tool for audio transcription and LLM post-processing, powered by 
 
 ## 🚀 Features
 
+* **🎙️ Microphone Recording:** Capture audio directly from your terminal using a push-to-talk mechanism (Hold SPACE to record).
 * **📁 File Transcription:** Process local audio and video files (`.mp3`, `.wav`, `.mp4`, `.m4a`, etc.) using Groq's whisper models.
-* **🎙️ Microphone Recording:** Capture audio directly from your terminal and transcribe it on the fly.
 * **✂️ Auto-Chunking:** Automatically splits large audio files to bypass standard API file size limits (Groq currently limits audio files to 25MB).
-* **✨ LLM Post-Processing:** Feed your transcriptions back into an OpenRouter LLM for summarization, formatting, or action-item extraction.
+* **✨ LLM Post-Processing:** Refine your transcriptions using OpenRouter LLMs for grammar correction, summarization, or translation.
+* **📜 Prompt Management:** Local queue to store and retrieve transcription history for easy access and processing.
 
 ## 🛠️ Technology Stack
 
@@ -16,7 +17,7 @@ A powerful CLI tool for audio transcription and LLM post-processing, powered by 
 * **UI/Output:** [Rich](https://rich.readthedocs.io/) for beautiful console output, progress bars, and Markdown rendering.
 * **Audio Processing:** [pydub](https://github.com/jiaaro/pydub) for handling various audio formats and chunking large files.
 * **Microphone Capture:** `sounddevice`, `soundfile`, and `pynput` for cross-platform push-to-talk recording.
-* **API Client:** The official `openai` Python SDK (configured to route through OpenRouter).
+* **API Client:** The official `openai` Python SDK (configured for Groq and OpenRouter).
 
 ## 📋 Prerequisites
 
@@ -59,10 +60,7 @@ Before you begin, ensure you have the following installed on your system:
 
 ## ⚙️ Configuration
 
-`aitranscribe` uses a global configuration file to allow execution from any directory.
-
-On the first run, the tool will automatically create a configuration template at:
-`~/.config/aitranscribe/config`
+`aitranscribe` uses a global configuration file located at `~/.config/aitranscribe/config`. On the first run, the tool will automatically create a template for you.
 
 1. Open the file using your favorite editor:
 
@@ -70,7 +68,7 @@ On the first run, the tool will automatically create a configuration template at
    nano ~/.config/aitranscribe/config
    ```
 
-2. Add your Groq API key for STT and OpenRouter API key for LLM processing:
+2. Add your API keys and preferred models:
 
    ```env
    GROQ_API_KEY="your_groq_api_key_here"
@@ -81,37 +79,44 @@ On the first run, the tool will automatically create a configuration template at
 
 ## 🎯 Usage Examples
 
-Because we symlinked `aitranscribe` to our global path, we can run it simply by typing `aitranscribe` from any directory on our system!
+Since `aitranscribe` is symlinked to your global path, you can run it from any directory!
 
-**Record from microphone (Default Mode, Push-to-Talk via Spacebar):**
-
+**Record from microphone (Default Mode, Push-to-Talk):**
+Hold **SPACE** to record, release to stop. Press **ESC** to cancel.
 ```bash
 aitranscribe
 ```
 
 **Transcribe a local file:**
-
 ```bash
-aitranscribe file path/to/audio.mp3
+aitranscribe --file path/to/audio.mp3
 ```
 
-**Transcribe previous recording:**
-
+**Translate to English directly:**
 ```bash
-# Running "file" without arguments defaults to /tmp/aitranscribe_record.mp3
-aitranscribe file
+aitranscribe --file audio_in_other_language.mp3 --english
 ```
 
-**Transcribe a large file (auto-chunking applied automatically):**
-
+**Apply LLM Post-Processing:**
+Correct grammar and structure the text automatically:
 ```bash
-aitranscribe file path/to/huge_podcast.mp3
+aitranscribe --post-process
+```
+Or provide a custom prompt for processing:
+```bash
+aitranscribe --file meeting.wav --post-process "Summarize this meeting into bullet points"
 ```
 
-**Transcribe and summarize using an LLM:**
-
+**Manage Prompt History:**
 ```bash
-aitranscribe file meeting.wav --post-process "Summarize this meeting and extract action items"
+aitranscribe --list      # Show all stored transcriptions
+aitranscribe --query     # Retrieve the oldest transcription from the queue
+aitranscribe --remove 1  # Remove a specific transcription by its ID
+```
+
+**Start fresh (Clean up temp files):**
+```bash
+aitranscribe --new
 ```
 
 ## 🧪 Testing
@@ -130,18 +135,14 @@ We provide a test infrastructure to ensure dependencies are installed and CLI wo
    pytest
    ```
 
-Or use `tox` to run them in an isolated environment.
-
 ## 🏗️ Code Architecture
 
 The project follows clean code principles with focus on maintainability and testability:
 
-* **Option Factory Pattern:** CLI options are defined through factory functions for consistency and reusability
-* **Shared Logic Helpers:** Common operations are extracted into reusable utility functions
-* **Comprehensive Testing:** All new functions include unit tests and integration tests
-* **Single Source of Truth:** CLI parameters and shared logic are defined once, used everywhere
-
-This architecture ensures that changes to shared functionality only need to be made in one place, reducing duplication and maintenance overhead.
+* **Option Factory Pattern:** CLI options are defined through factory functions for consistency and reusability.
+* **Shared Logic Helpers:** Common operations are extracted into reusable utility functions.
+* **Comprehensive Testing:** Unit and integration tests cover core logic and CLI interactions.
+* **Single Source of Truth:** CLI parameters and configuration are centralized.
 
 ## 📄 License
 
