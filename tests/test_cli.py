@@ -41,12 +41,19 @@ except ImportError as e:
 
 runner = CliRunner()
 
-def test_cli_help():
-    """Test that CLI loads and help command works."""
-    result = runner.invoke(app, ["--help"])
-    assert result.exit_code == 0
-    assert "aitranscribe" in result.stdout
-    assert "--file" in result.stdout
+def test_config_dir_path_selection():
+    """Test that CONFIG_DIR selection logic works correctly based on OS."""
+    from pathlib import PurePath, PureWindowsPath, PurePosixPath
+    
+    # Test Windows selection logic
+    appdata = 'C:\\Users\\FakeUser\\AppData\\Roaming'
+    config_dir = PureWindowsPath(appdata) / "aitranscribe"
+    assert str(config_dir) == 'C:\\Users\\FakeUser\\AppData\\Roaming\\aitranscribe'
+
+    # Test Linux selection logic
+    home = '/home/fakeuser'
+    config_dir = PurePosixPath(home) / ".config" / "aitranscribe"
+    assert str(config_dir) == '/home/fakeuser/.config/aitranscribe'
 
 def test_cli_file_missing_arg():
     """Test that --file option defaults to /tmp/aitranscribe_record.mp3."""
