@@ -25,6 +25,7 @@ try:
         file_path_argument,
         list_prompts_option,
         query_prompt_option,
+        remove_prompt_option,
         apply_english_translation,
         cleanup_old_records,
         validate_api_keys,
@@ -33,6 +34,7 @@ try:
         CONFIG_FILE,
         stt_client,
         llm_client,
+        PromptManager,
     )
 except ImportError as e:
     pytest.fail(f"Failed to import the CLI app due to missing dependencies: {e}")
@@ -110,6 +112,11 @@ def test_list_prompts_option():
 def test_query_prompt_option():
     """Test that query_prompt_option returns correct typer.Option."""
     option = query_prompt_option()
+    assert isinstance(option, typer.models.OptionInfo)
+
+def test_remove_prompt_option():
+    """Test that remove_prompt_option returns correct typer.Option."""
+    option = remove_prompt_option()
     assert isinstance(option, typer.models.OptionInfo)
 
 # ==================== Logic Helper Tests ====================
@@ -232,3 +239,65 @@ def test_cli_query_prompt_empty():
     result = runner.invoke(app, ["--query"])
     assert result.exit_code == 0
     assert "No prompts in queue" in result.stdout
+
+def test_cli_remove_prompt_empty():
+    """Test that --remove option works with empty queue."""
+    result = runner.invoke(app, ["--remove", "1"])
+    assert result.exit_code == 0
+    assert "No prompts to remove" in result.stdout
+
+def test_cli_remove_prompt_invalid_index():
+    """Test that --remove option handles invalid index."""
+    result = runner.invoke(app, ["--remove", "999"])
+    assert result.exit_code == 0
+    assert "Invalid index" in result.stdout or "No prompts to remove" in result.stdout
+
+# ==================== PromptManager Unit Tests ====================
+
+def test_promptmanager_remove_prompt_empty():
+    """Test PromptManager.remove_prompt with empty queue."""
+    with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f:
+        temp_file = Path(f.name)
+    
+    try:
+        manager = PromptManager(temp_file)
+        result = manager.remove_prompt(1)
+        assert result is False
+        assert len(manager.prompts) == 0
+    finally:
+        temp_file.unlink()
+
+def test_promptmanager_remove_prompt_invalid_index():
+    """Test PromptManager.remove_prompt with invalid index."""
+    with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f:
+        temp_file = Path(f.name)
+    
+    try:
+        manager = PromptManager(temp_file)
+        manager.add_prompt("First prompt", "file1.mp3")
+        manager.add_prompt("Second prompt", "file2.mp3")
+        
+        result = manager.remove_prompt(5)
+        assert result is False
+        assert len(manager.prompts) == 2
+    finally:
+        temp_file.unlink()
+
+def test_promptmanager_remove_prompt_success():
+    """Test PromptManager.remove_prompt removes correct prompt."""
+    with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f:
+        temp_file = Path(f.name)
+    
+    try:
+        manager = PromptManager(temp_file)
+        manager.add_prompt("First prompt", "file1.mp3")
+        manager.add_prompt("Second prompt", "file2.mp3")
+        manager.add_prompt("Third prompt", "file3.mp3")
+        
+        result = manager.remove_prompt(2)
+        assert result is True
+        assert len(manager.prompts) == 2
+        assert manager.prompts[0]['prompt'] == "First prompt"
+        assert manager.prompts[1]['prompt'] == "Third prompt"
+    finally:
+        temp_file.unlink()

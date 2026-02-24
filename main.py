@@ -100,6 +100,9 @@ def list_prompts_option():
 def query_prompt_option():
     return typer.Option(False, "--query", "-q", help="Get oldest prompt (queue behavior)")
 
+def remove_prompt_option():
+    return typer.Option(None, "--remove", "-r", help="Remove prompt by number (use with --list)")
+
 def file_path_argument():
     return typer.Argument("/tmp/aitranscribe_record.mp3", help="Path to audio or video file")
 
@@ -217,6 +220,21 @@ class PromptManager:
         self._save_prompts()
         return oldest_prompt['prompt']
 
+    def remove_prompt(self, index: int) -> bool:
+        """Remove a prompt by its 1-based index."""
+        if not self.prompts:
+            console.print("[yellow]No prompts to remove.[/yellow]")
+            return False
+
+        if index < 1 or index > len(self.prompts):
+            console.print(f"[red]Error: Invalid index {index}. Valid range is 1-{len(self.prompts)}.[/red]")
+            return False
+
+        removed_prompt = self.prompts.pop(index - 1)
+        self._save_prompts()
+        console.print(f"[green]Removed prompt {index}: {removed_prompt['prompt'][:50]}...[/green]")
+        return True
+
 # Initialize PromptManager
 prompt_manager = PromptManager(PROMPTS_FILE)
 
@@ -235,6 +253,7 @@ def main(
     file: str | None = file_option(),
     list_prompts: bool = list_prompts_option(),
     query_prompt: bool = query_prompt_option(),
+    remove_prompt: int | None = remove_prompt_option(),
     english: bool = english_option(),
     llm_model: str = llm_model_option(),
     new: bool = new_option(),
@@ -261,11 +280,15 @@ def main(
         prompt_manager.list_prompts()
         raise typer.Exit(code=0)
 
+    if remove_prompt is not None:
+        prompt_manager.remove_prompt(remove_prompt)
+        raise typer.Exit(code=0)
+
     if query_prompt:
         retrieved_prompt = prompt_manager.query_prompt()
         if retrieved_prompt:
             console.print(retrieved_prompt)
-            raise typer.Exit(code=0)
+        raise typer.Exit(code=0)
 
     if file:
         transcribe_file(file, stt_model, llm_model, post_process, verbose, english, new)
