@@ -425,7 +425,7 @@ def record_from_microphone(stt_model: str, llm_model: str, post_process: str | N
     console.print("[bold]Push-to-Talk Recording[/bold]")
     console.print(f"STT Model: [cyan]{stt_model}[/cyan]")
     console.print(f"LLM Model: [cyan]{llm_model}[/cyan]")
-    console.print("Hold [bold cyan]SPACE[/bold cyan] to record. Release to stop. Press [bold cyan]q[/bold cyan] to cancel.")
+    console.print("Hold [bold cyan]SPACE[/bold cyan] to record. Release to stop. Press [bold cyan]ESC[/bold cyan] to cancel.")
 
     # Shared state for the listener
     recording_state = {
@@ -439,7 +439,7 @@ def record_from_microphone(stt_model: str, llm_model: str, post_process: str | N
             if not recording_state["is_recording"]:
                 recording_state["is_recording"] = True
                 # UI is handled in the main loop
-        elif hasattr(key, 'char') and key.char == 'q':
+        elif key == keyboard.Key.esc:
             recording_state["stop_event"] = True
             recording_state["cancelled"] = True
             return False
@@ -475,12 +475,16 @@ def record_from_microphone(stt_model: str, llm_model: str, post_process: str | N
             new_settings[6][termios.VMIN] = 0
             new_settings[6][termios.VTIME] = 0
             termios.tcsetattr(fd, termios.TCSADRAIN, new_settings)
-            console.print("Press [bold cyan]SPACE[/bold cyan] to start, [bold cyan]SPACE[/bold cyan] again to stop.")
+            console.print("Press [bold cyan]SPACE[/bold cyan] to start, [bold cyan]SPACE[/bold cyan] again to stop. Press [bold cyan]ESC[/bold cyan] to cancel.")
         except Exception as e:
             console.print(f"[red]Error: Could not set up fallback keyboard input: {e}[/red]")
             raise typer.Exit(code=1)
 
     try:
+        # Hide cursor during recording
+        sys.stdout.write("\033[?25l")
+        sys.stdout.flush()
+
         def callback(indata, frames, cb_time, status):
             if recording_state["is_recording"]:
                 audio_data.append(indata.copy())
@@ -507,7 +511,7 @@ def record_from_microphone(stt_model: str, llm_model: str, post_process: str | N
                             else:
                                 recording_state["is_recording"] = False
                                 recording_state["stop_event"] = True
-                        elif key == 'q' or key == '\x03':
+                        elif key == '\x1b' or key == '\x03':
                             recording_state["stop_event"] = True
                             recording_state["cancelled"] = True
                             break
@@ -517,12 +521,12 @@ def record_from_microphone(stt_model: str, llm_model: str, post_process: str | N
                     if start_time is None:
                         start_time = now
                         last_update = start_time
-                        sys.stdout.write("\r\033[K\033[32m⏺ Recording... 0.0s\033[0m")
+                        sys.stdout.write("\r\033[K\033[32m⏺ Recording... 0s\033[0m")
                         sys.stdout.flush()
 
-                    if now - last_update >= 0.1: # Faster updates for smoother UI
+                    if now - last_update >= 1.0:
                         duration = now - start_time
-                        sys.stdout.write(f"\r\033[K\033[32m⏺ Recording... {duration:.1f}s\033[0m")
+                        sys.stdout.write(f"\r\033[K\033[32m⏺ Recording... {int(duration)}s\033[0m")
                         sys.stdout.flush()
                         last_update = now
                 else:
@@ -540,6 +544,9 @@ def record_from_microphone(stt_model: str, llm_model: str, post_process: str | N
                 return
 
     finally:
+        # Show cursor again
+        sys.stdout.write("\033[?25h")
+        sys.stdout.flush()
         if listener is not None and listener.is_alive():
             listener.stop()
         # Restore terminal settings
