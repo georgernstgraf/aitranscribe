@@ -20,7 +20,7 @@ from openai import OpenAI
 from pynput import keyboard
 from core import chunk_audio, transcribe_audio, process_with_llm, compress_audio
 
-console = Console()
+console = Console(highlight=False, color_system=None)
 state = {"verbose": False}
 
 # Configuration Directory
@@ -556,12 +556,12 @@ def record_from_microphone(stt_model: str, llm_model: str, post_process: bool, v
                     if start_time is None:
                         start_time = now
                         last_update = start_time
-                        sys.stdout.write("\r\033[K\033[32m⏺ Recording... 0s\033[0m")
+                        sys.stdout.write("\r\033[K⏺ Recording... 0s")
                         sys.stdout.flush()
 
                     if now - last_update >= 1.0:
                         duration = now - start_time
-                        sys.stdout.write(f"\r\033[K\033[32m⏺ Recording... {int(duration)}s\033[0m")
+                        sys.stdout.write(f"\r\033[K⏺ Recording... {int(duration)}s")
                         sys.stdout.flush()
                         last_update = now
                 else:
