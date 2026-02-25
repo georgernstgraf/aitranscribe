@@ -14,7 +14,7 @@ import datetime
 from pathlib import Path
 from typing import Any
 from rich.console import Console
-from rich.progress import Progress, SpinnerColumn, TextColumn
+from rich.progress import Progress, TextColumn
 from dotenv import load_dotenv
 from openai import OpenAI
 from pynput import keyboard
@@ -54,8 +54,8 @@ if not CONFIG_FILE.exists() or "GROQ_API_KEY" not in CONFIG_FILE.read_text():
         if mode == "w":
             f.write('OPENROUTER_LLM_MODEL="anthropic/claude-3-haiku"\n')
         f.write(f'PROMPTS_FILE="{PROMPTS_FILE}"\n')
-    console.print(f"[yellow]Updated/Created configuration at {CONFIG_FILE}[/yellow]")
-    console.print("[yellow]Please edit this file to add your API keys before running the tool.[/yellow]")
+    console.print(f"Updated/Created configuration at {CONFIG_FILE}")
+    console.print("Please edit this file to add your API keys before running the tool.")
 
 # Load environment variables from global config
 load_dotenv(dotenv_path=CONFIG_FILE)
@@ -135,18 +135,18 @@ def cleanup_old_records() -> int:
             os.remove(f)
             deleted_count += 1
         except OSError as e:
-            console.print(f"[yellow]Could not delete {f}: {e}[/yellow]")
+            console.print(f"Could not delete {f}: {e}")
     if deleted_count > 0:
-        console.print(f"[blue]Deleted {deleted_count} previous recording(s) in {temp_dir}[/blue]")
+        console.print(f"Deleted {deleted_count} previous recording(s) in {temp_dir}")
     return deleted_count
 
 def validate_api_keys(post_process: str | None) -> None:
     if not stt_client:
-        console.print(f"[red]Error: GROQ_API_KEY is not set or invalid in {CONFIG_FILE}.[/red]")
+        console.print(f"Error: GROQ_API_KEY is not set or invalid in {CONFIG_FILE}.")
         raise typer.Exit(code=1)
 
     if post_process and not llm_client:
-        console.print(f"[red]Error: OPENROUTER_API_KEY is not set but needed for post-processing.[/red]")
+        console.print(f"Error: OPENROUTER_API_KEY is not set but needed for post-processing.")
         raise typer.Exit(code=1)
 
 def wrap_text(text: str, max_length: int = 80) -> str:
@@ -189,7 +189,7 @@ class PromptManager:
                 with open(self.prompts_file, 'r', encoding='utf-8') as f:
                     return json.load(f)
             except Exception as e:
-                console.print(f"[yellow]Warning: Could not load prompts file: {e}[/yellow]")
+                console.print(f"Warning: Could not load prompts file: {e}")
                 return []
         return []
 
@@ -199,7 +199,7 @@ class PromptManager:
             with open(self.prompts_file, 'w', encoding='utf-8') as f:
                 json.dump(self.prompts, f, indent=2)
         except Exception as e:
-            console.print(f"[yellow]Warning: Could not save prompts file: {e}[/yellow]")
+            console.print(f"Warning: Could not save prompts file: {e}")
 
     def add_prompt(self, prompt: str, filename: str) -> None:
         """Add a new prompt to the end of the list."""
@@ -214,19 +214,19 @@ class PromptManager:
     def list_prompts(self) -> None:
         """List all stored prompts in order."""
         if not self.prompts:
-            console.print("[yellow]No prompts stored yet.[/yellow]")
+            console.print("No prompts stored yet.")
             return
 
-        console.print("[bold]Stored Prompts:[/bold]")
+        console.print("Stored Prompts:")
         for i, prompt in enumerate(self.prompts, 1):
-            console.print(f"\n[cyan]{i}.[/cyan] {prompt['prompt']}")
-            console.print(f"    [dim]File: {prompt['filename']}[/dim]")
-            console.print(f"    [dim]Time: {prompt['timestamp']}[/dim]")
+            console.print(f"\n{i}. {prompt['prompt']}")
+            console.print(f"    File: {prompt['filename']}")
+            console.print(f"    Time: {prompt['timestamp']}")
 
     def query_prompt(self) -> str | None:
         """Get the oldest prompt and remove it from the list (queue behavior)."""
         if not self.prompts:
-            console.print("[yellow]No prompts in queue.[/yellow]")
+            console.print("No prompts in queue.")
             return None
 
         oldest_prompt = self.prompts.pop(0)
@@ -236,16 +236,16 @@ class PromptManager:
     def remove_prompt(self, index: int) -> bool:
         """Remove a prompt by its 1-based index."""
         if not self.prompts:
-            console.print("[yellow]No prompts to remove.[/yellow]")
+            console.print("No prompts to remove.")
             return False
 
         if index < 1 or index > len(self.prompts):
-            console.print(f"[red]Error: Invalid index {index}. Valid range is 1-{len(self.prompts)}.[/red]")
+            console.print(f"Error: Invalid index {index}. Valid range is 1-{len(self.prompts)}.")
             return False
 
         removed_prompt = self.prompts.pop(index - 1)
         self._save_prompts()
-        console.print(f"[green]Removed prompt {index}: {removed_prompt['prompt'][:50]}...[/green]")
+        console.print(f"Removed prompt {index}: {removed_prompt['prompt'][:50]}...")
         return True
 
 # Initialize PromptManager
@@ -290,7 +290,7 @@ def main(
 
     # Enforce mutual exclusivity between --english and --post-process
     if english and post_process:
-        console.print("[red]Error: Options --english and --post-process are mutually exclusive.[/red]")
+        console.print("Error: Options --english and --post-process are mutually exclusive.")
         raise typer.Exit(code=1)
 
     # Handle prompt management commands
@@ -325,12 +325,12 @@ def transcribe_file(file_path: str, stt_model: str, llm_model: str, post_process
 
     validate_api_keys(prompt)
 
-    console.print(f"[blue]Preparing to transcribe file: {file_path}[/blue]")
-    console.print(f"STT Model: [cyan]{stt_model}[/cyan]")
-    console.print(f"LLM Model: [cyan]{llm_model}[/cyan]")
+    console.print(f"Preparing to transcribe file: {file_path}")
+    console.print(f"STT Model: {stt_model}")
+    console.print(f"LLM Model: {llm_model}")
 
     if not os.path.exists(file_path):
-        console.print(f"[red]Error: File not found: {file_path}[/red]")
+        console.print(f"Error: File not found: {file_path}")
         raise typer.Exit(code=1)
 
     # Determine the next version number for output files in temp_dir
@@ -357,15 +357,15 @@ def transcribe_file(file_path: str, stt_model: str, llm_model: str, post_process
     try:
         shutil.copy2(file_path, temp_file_path)
         file_path = temp_file_path
-        console.print(f"[blue]Copied file to temp location: {file_path}[/blue]")
+        console.print(f"Copied file to temp location: {file_path}")
     except Exception as e:
-        console.print(f"[yellow]Warning: Could not copy file to temp directory: {e}[/yellow]")
+        console.print(f"Warning: Could not copy file to temp directory: {e}")
 
     try:
         with Progress(
-            SpinnerColumn(),
-            TextColumn("[progress.description]{task.description}"),
+            TextColumn("{task.description}"),
             transient=True,
+            console=console
         ) as progress:
             # 1. Chunking
             progress.add_task(description="Checking file size and chunking...", total=None)
@@ -385,25 +385,25 @@ def transcribe_file(file_path: str, stt_model: str, llm_model: str, post_process
 
             final_text = " ".join(t for t in full_transcript if t).strip()
 
-        console.print("\n[bold green]Transcription Complete:[/bold green]")
+        console.print("\nTranscription Complete:")
         console.print(final_text)
 
         # 3. Post-Processing
         if prompt:
-            console.print(f"\n[bold blue]Applying LLM Post-Processing...[/bold blue]")
-            console.print(f"Prompt: [magenta]{prompt}[/magenta]")
-            console.print(f"Model: [cyan]{llm_model}[/cyan]")
+            console.print(f"\nApplying LLM Post-Processing...")
+            console.print(f"Prompt: {prompt}")
+            console.print(f"Model: {llm_model}")
 
             with Progress(
-                SpinnerColumn(),
-                TextColumn("[progress.description]{task.description}"),
+                TextColumn("{task.description}"),
                 transient=True,
+                console=console
             ) as progress:
                 progress.add_task(description="Processing with LLM...", total=None)
                 assert llm_client is not None
                 llm_result = process_with_llm(llm_client, final_text, prompt, llm_model)
 
-            console.print("\n[bold green]LLM Result:[/bold green]")
+            console.print("\nLLM Result:")
             console.print(llm_result)
 
             # Store LLM result in prompt queue
@@ -413,7 +413,7 @@ def transcribe_file(file_path: str, stt_model: str, llm_model: str, post_process
             prompt_manager.add_prompt(final_text, file_path)
 
     except Exception as e:
-        console.print(f"[red]An error occurred: {str(e)}[/red]")
+        console.print(f"An error occurred: {str(e)}")
         if state["verbose"]:
             console.print_exception()
         raise typer.Exit(code=1)
@@ -434,10 +434,10 @@ def record_from_microphone(stt_model: str, llm_model: str, post_process: bool, v
     channels = 1
     audio_data = []
 
-    console.print("[bold]Push-to-Talk Recording[/bold]")
-    console.print(f"STT Model: [cyan]{stt_model}[/cyan]")
-    console.print(f"LLM Model: [cyan]{llm_model}[/cyan]")
-    console.print("Hold [bold cyan]SPACE[/bold cyan] to record. Release to stop. Press [bold cyan]ESC[/bold cyan] to cancel.")
+    console.print("Push-to-Talk Recording")
+    console.print(f"STT Model: {stt_model}")
+    console.print(f"LLM Model: {llm_model}")
+    console.print("Hold SPACE to record. Release to stop. Press ESC to cancel.")
 
     # Shared state for the listener
     recording_state = {
@@ -471,8 +471,8 @@ def record_from_microphone(stt_model: str, llm_model: str, post_process: bool, v
         listener.start()
     except Exception as e:
         if verbose:
-            console.print(f"[yellow]Warning: Could not start pynput listener: {e}[/yellow]")
-        console.print("[yellow]Falling back to toggle-mode recording (press SPACE to start/stop).[/yellow]")
+            console.print(f"Warning: Could not start pynput listener: {e}")
+        console.print("Falling back to toggle-mode recording (press SPACE to start/stop).")
         # Fallback to termios/msvcrt handled below by checking if listener is None
 
     fd = None
@@ -497,9 +497,9 @@ def record_from_microphone(stt_model: str, llm_model: str, post_process: bool, v
     if listener is None:
         # Check if we can at least use msvcrt (Windows) or termios (Unix)
         if os.name == 'nt' or fd is not None:
-            console.print("Press [bold cyan]SPACE[/bold cyan] to start, [bold cyan]SPACE[/bold cyan] again to stop. Press [bold cyan]ESC[/bold cyan] to cancel.")
+            console.print("Press SPACE to start, SPACE again to stop. Press ESC to cancel.")
         else:
-            console.print(f"[red]Error: Could not set up keyboard input.[/red]")
+            console.print(f"Error: Could not set up keyboard input.")
             raise typer.Exit(code=1)
 
     try:
@@ -519,7 +519,7 @@ def record_from_microphone(stt_model: str, llm_model: str, post_process: bool, v
 
             while not recording_state["stop_event"]:
                 if time.time() - total_start_time > timeout:
-                    console.print("\n[red]Recording session timed out.[/red]")
+                    console.print("\nRecording session timed out.")
                     recording_state["stop_event"] = True
                     break
                 
@@ -567,7 +567,7 @@ def record_from_microphone(stt_model: str, llm_model: str, post_process: bool, v
                 else:
                     if start_time is not None:
                         # Transition from recording to stopped
-                        sys.stdout.write("\n[yellow]⏹ Recording stopped.[/yellow]\n")
+                        sys.stdout.write("\n⏹ Recording stopped.\n")
                         sys.stdout.flush()
                         start_time = None
                 
@@ -575,7 +575,7 @@ def record_from_microphone(stt_model: str, llm_model: str, post_process: bool, v
 
             if recording_state["cancelled"]:
                 if recording_state["is_recording"]:
-                    console.print("\n[yellow]Recording cancelled.[/yellow]")
+                    console.print("\nRecording cancelled.")
                 return
 
     finally:
@@ -603,7 +603,7 @@ def record_from_microphone(stt_model: str, llm_model: str, post_process: bool, v
                 pass
 
     if not audio_data:
-        console.print("[red]No audio recorded. Exiting.[/red]")
+        console.print("No audio recorded. Exiting.")
         return
 
     # Convert to numpy array
@@ -634,9 +634,9 @@ def record_from_microphone(stt_model: str, llm_model: str, post_process: bool, v
 
     try:
         with Progress(
-            SpinnerColumn(),
-            TextColumn("[progress.description]{task.description}"),
+            TextColumn("{task.description}"),
             transient=True,
+            console=console
         ) as progress:
             # First, compress WAV to MP3 to save bandwidth and potentially tokens
             progress.add_task(description="Compressing audio...", total=None)
@@ -646,31 +646,31 @@ def record_from_microphone(stt_model: str, llm_model: str, post_process: bool, v
             if os.path.exists(raw_wav_file):
                 os.remove(raw_wav_file)
 
-            console.print(f"[blue]Audio saved to {final_mp3_file}[/blue]")
+            console.print(f"Audio saved to {final_mp3_file}")
 
             progress.add_task(description="Transcribing audio...", total=None)
             assert stt_client is not None
             transcript = transcribe_audio(stt_client, final_mp3_file, stt_model)
 
-        console.print("\n[bold green]Transcription Complete:[/bold green]")
+        console.print("\nTranscription Complete:")
         console.print(transcript)
 
         # Post-Processing
         if prompt:
-            console.print(f"\n[bold blue]Applying LLM Post-Processing...[/bold blue]")
-            console.print(f"Prompt: [magenta]{prompt}[/magenta]")
-            console.print(f"Model: [cyan]{llm_model}[/cyan]")
+            console.print(f"\nApplying LLM Post-Processing...")
+            console.print(f"Prompt: {prompt}")
+            console.print(f"Model: {llm_model}")
 
             with Progress(
-                SpinnerColumn(),
-                TextColumn("[progress.description]{task.description}"),
+                TextColumn("{task.description}"),
                 transient=True,
+                console=console
             ) as progress:
                 progress.add_task(description="Processing with LLM...", total=None)
                 assert llm_client is not None
                 llm_result = process_with_llm(llm_client, transcript, prompt, llm_model)
 
-            console.print("\n[bold green]LLM Result:[/bold green]")
+            console.print("\nLLM Result:")
             console.print(llm_result)
 
             # Store LLM result in prompt queue
@@ -680,11 +680,11 @@ def record_from_microphone(stt_model: str, llm_model: str, post_process: bool, v
             prompt_manager.add_prompt(transcript, final_mp3_file)
 
     except Exception as e:
-        console.print(f"[red]An error occurred: {str(e)}[/red]")
+        console.print(f"An error occurred: {str(e)}")
         if state["verbose"]:
             console.print_exception()
         # Keep the file on disk if there is an error
-        console.print(f"[yellow]Retaining recorded file for debugging: {final_mp3_file}[/yellow]")
+        console.print(f"Retaining recorded file for debugging: {final_mp3_file}")
     else:
         # We now keep the final mp3 file on disk for reuse, as requested
         # We only clean up the raw uncompressed wav file
