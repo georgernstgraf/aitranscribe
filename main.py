@@ -9,7 +9,7 @@ import soundfile as sf
 import numpy as np
 import tempfile
 import glob
-import json
+import sqlite3
 import datetime
 from pathlib import Path
 from typing import Any
@@ -36,7 +36,7 @@ else:
     CONFIG_DIR = Path.home() / ".config" / "aitranscribe"
 
 CONFIG_FILE = CONFIG_DIR / "config"
-PROMPTS_FILE = CONFIG_DIR / "prompts.json"
+PROMPTS_FILE = CONFIG_DIR / "prompts.sqlite"
 
 # Create default config if it doesn't exist
 if not CONFIG_FILE.exists() or "GROQ_API_KEY" not in CONFIG_FILE.read_text():
@@ -106,10 +106,10 @@ def file_option():
     return typer.Option(None, "--file", "-f", help="Path to audio/video file (default: record from microphone)")
 
 def list_prompts_option():
-    return typer.Option(False, "--list", "-l", help="List all stored prompts")
+    return typer.Option(False, "--list", "-l", help="List unplayed stored prompts")
 
 def query_prompt_option():
-    return typer.Option(False, "--query", "-q", help="Get oldest prompt (queue behavior)")
+    return typer.Option(False, "--query", "-q", help="Get oldest unplayed prompt (queue behavior)")
 
 def remove_prompt_option():
     return typer.Option(None, "--remove", "-r", help="Remove prompt by number (use with --list)")
@@ -175,78 +175,142 @@ def wrap_text(text: str, max_length: int = 80) -> str:
 
 # Prompt Manager Class
 class PromptManager:
-    """Manages stored prompts in a JSON file."""
+    """Manages stored prompts in a SQLite database."""
 
     def __init__(self, prompts_file: Path):
         self.prompts_file = prompts_file
         self.prompts_file.parent.mkdir(parents=True, exist_ok=True)
-        self.prompts = self._load_prompts()
+        self._initialize_db()
 
-    def _load_prompts(self) -> list:
-        """Load prompts from JSON file."""
-        if self.prompts_file.exists():
-            try:
-                with open(self.prompts_file, 'r', encoding='utf-8') as f:
-                    return json.load(f)
-            except Exception as e:
-                console.print(f"Warning: Could not load prompts file: {e}")
-                return []
-        return []
+    def _connect(self) -> sqlite3.Connection:
+        return sqlite3.connect(self.prompts_file)
 
-    def _save_prompts(self) -> None:
-        """Save prompts to JSON file."""
+    def _initialize_db(self) -> None:
         try:
-            with open(self.prompts_file, 'w', encoding='utf-8') as f:
-                json.dump(self.prompts, f, indent=2)
+            with self._connect() as conn:
+                conn.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS prompts (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        prompt TEXT NOT NULL,
+                        filename TEXT NOT NULL,
+                        created_at TEXT NOT NULL,
+                        played_count INTEGER NOT NULL DEFAULT 0
+                    )
+                    """
+                )
+                conn.execute(
+                    "CREATE INDEX IF NOT EXISTS idx_prompts_unplayed ON prompts (played_count, id)"
+                )
         except Exception as e:
-            console.print(f"Warning: Could not save prompts file: {e}")
+            console.print(f"Warning: Could not initialize prompts database: {e}")
+
+    @property
+    def prompts(self) -> list[dict[str, Any]]:
+        """Compatibility view of unplayed prompts for tests and callers."""
+        return self._get_unplayed_prompts()
+
+    def _get_unplayed_prompts(self) -> list[dict[str, Any]]:
+        try:
+            with self._connect() as conn:
+                cursor = conn.execute(
+                    """
+                    SELECT id, prompt, filename, created_at, played_count
+                    FROM prompts
+                    WHERE played_count = 0
+                    ORDER BY id ASC
+                    """
+                )
+                rows = cursor.fetchall()
+                return [
+                    {
+                        "id": row[0],
+                        "prompt": row[1],
+                        "filename": row[2],
+                        "timestamp": row[3],
+                        "played": row[4],
+                    }
+                    for row in rows
+                ]
+        except Exception as e:
+            console.print(f"Warning: Could not query prompts database: {e}")
+            return []
 
     def add_prompt(self, prompt: str, filename: str) -> None:
-        """Add a new prompt to the end of the list."""
-        prompt_entry = {
-            "prompt": wrap_text(prompt),
-            "filename": filename,
-            "timestamp": datetime.datetime.now().isoformat()
-        }
-        self.prompts.append(prompt_entry)
-        self._save_prompts()
+        """Add a new prompt to the queue with played_count = 0."""
+        created_at = datetime.datetime.now().isoformat()
+        try:
+            with self._connect() as conn:
+                conn.execute(
+                    """
+                    INSERT INTO prompts (prompt, filename, created_at, played_count)
+                    VALUES (?, ?, ?, 0)
+                    """,
+                    (wrap_text(prompt), filename, created_at),
+                )
+        except Exception as e:
+            console.print(f"Warning: Could not store prompt: {e}")
 
     def list_prompts(self) -> None:
-        """List all stored prompts in order."""
-        if not self.prompts:
+        """List all unplayed prompts in queue order."""
+        unplayed_prompts = self._get_unplayed_prompts()
+        if not unplayed_prompts:
             console.print("No prompts stored yet.")
             return
 
         console.print("Stored Prompts:")
-        for i, prompt in enumerate(self.prompts, 1):
+        for i, prompt in enumerate(unplayed_prompts, 1):
             console.print(f"\n{i}. {prompt['prompt']}")
             console.print(f"    File: {prompt['filename']}")
             console.print(f"    Time: {prompt['timestamp']}")
 
     def query_prompt(self) -> str | None:
-        """Get the oldest prompt and remove it from the list (queue behavior)."""
-        if not self.prompts:
-            console.print("No prompts in queue.")
+        """Get the oldest unplayed prompt and increment its played counter."""
+        try:
+            with self._connect() as conn:
+                cursor = conn.execute(
+                    """
+                    SELECT id, prompt
+                    FROM prompts
+                    WHERE played_count = 0
+                    ORDER BY id ASC
+                    LIMIT 1
+                    """
+                )
+                row = cursor.fetchone()
+                if not row:
+                    console.print("No prompts in queue.")
+                    return None
+
+                conn.execute(
+                    "UPDATE prompts SET played_count = played_count + 1 WHERE id = ?",
+                    (row[0],),
+                )
+                return row[1]
+        except Exception as e:
+            console.print(f"Warning: Could not query prompt: {e}")
             return None
 
-        oldest_prompt = self.prompts.pop(0)
-        self._save_prompts()
-        return oldest_prompt['prompt']
-
     def remove_prompt(self, index: int) -> bool:
-        """Remove a prompt by its 1-based index."""
-        if not self.prompts:
+        """Remove an unplayed prompt by its 1-based --list index."""
+        unplayed_prompts = self._get_unplayed_prompts()
+        if not unplayed_prompts:
             console.print("No prompts to remove.")
             return False
 
-        if index < 1 or index > len(self.prompts):
-            console.print(f"Error: Invalid index {index}. Valid range is 1-{len(self.prompts)}.")
+        if index < 1 or index > len(unplayed_prompts):
+            console.print(f"Error: Invalid index {index}. Valid range is 1-{len(unplayed_prompts)}.")
             return False
 
-        removed_prompt = self.prompts.pop(index - 1)
-        self._save_prompts()
-        console.print(f"Removed prompt {index}: {removed_prompt['prompt'][:50]}...")
-        return True
+        removed_prompt = unplayed_prompts[index - 1]
+        try:
+            with self._connect() as conn:
+                conn.execute("DELETE FROM prompts WHERE id = ?", (removed_prompt["id"],))
+            console.print(f"Removed prompt {index}: {removed_prompt['prompt'][:50]}...")
+            return True
+        except Exception as e:
+            console.print(f"Warning: Could not remove prompt: {e}")
+            return False
 
 # Initialize PromptManager
 prompt_manager = PromptManager(PROMPTS_FILE)

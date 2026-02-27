@@ -4,6 +4,7 @@ from typer.testing import CliRunner
 from unittest.mock import patch, MagicMock
 import tempfile
 import os
+import sqlite3
 
 import sys
 from pathlib import Path
@@ -240,7 +241,7 @@ def test_promptmanager_query_prompt_empty():
         temp_file.unlink()
 
 def test_promptmanager_query_prompt_success():
-    """Test PromptManager.query_prompt retrieves and removes oldest prompt."""
+    """Test PromptManager.query_prompt retrieves oldest unplayed prompt."""
     with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f:
         temp_file = Path(f.name)
     
@@ -253,6 +254,28 @@ def test_promptmanager_query_prompt_success():
         assert result == "First prompt"
         assert len(manager.prompts) == 1
         assert manager.prompts[0]['prompt'] == "Second prompt"
+    finally:
+        temp_file.unlink()
+
+def test_promptmanager_query_prompt_increments_played_counter():
+    """Test PromptManager.query_prompt increments played counter instead of deleting."""
+    with tempfile.NamedTemporaryFile(mode='w', suffix='.sqlite', delete=False) as f:
+        temp_file = Path(f.name)
+
+    try:
+        manager = PromptManager(temp_file)
+        manager.add_prompt("Play me", "file1.mp3")
+
+        result = manager.query_prompt()
+        assert result == "Play me"
+        assert len(manager.prompts) == 0
+
+        with sqlite3.connect(temp_file) as conn:
+            row = conn.execute(
+                "SELECT prompt, played_count FROM prompts ORDER BY id ASC LIMIT 1"
+            ).fetchone()
+            assert row[0] == "Play me"
+            assert row[1] == 1
     finally:
         temp_file.unlink()
 
