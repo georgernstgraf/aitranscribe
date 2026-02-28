@@ -541,7 +541,7 @@ def record_from_microphone(stt_model: str, llm_model: str, post_process: bool, v
 
     fd = None
     old_settings = None
-    
+
     # Try to set up terminal to disable echo and canonical mode regardless of listener type
     # This prevents auto-repeat from flooding the terminal buffer
     if os.name != 'nt':
@@ -586,7 +586,7 @@ def record_from_microphone(stt_model: str, llm_model: str, post_process: bool, v
                     console.print("\nRecording session timed out.")
                     recording_state["stop_event"] = True
                     break
-                
+
                 # Check for fallback keyboard input
                 if listener is None:
                     key = None
@@ -634,7 +634,7 @@ def record_from_microphone(stt_model: str, llm_model: str, post_process: bool, v
                         sys.stdout.write("\n⏹ Recording stopped.\n")
                         sys.stdout.flush()
                         start_time = None
-                
+
                 time.sleep(0.05)
 
             if recording_state["cancelled"]:
