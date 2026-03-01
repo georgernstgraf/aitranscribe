@@ -1,0 +1,78 @@
+#!/bin/sh
+
+##############################################################################
+#
+# Copyright © 2015-2024 the original author or authors.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     https://www.apache.org/licenses/LICENSE-2.0
+#
+##############################################################################
+
+# Attempt to set APP_HOME
+
+# Resolve links: $0, ./path/to/exe, path/to/exe, \path\to\to\exe, "path\to\to"\exe
+
+resolve_links() {
+  cmd="$1"
+  while [ -n "$cmd" ]; do
+    if [ -x "$cmd" ]; then
+      resolved_path=$(readlink -f "$cmd")
+      if [ -n "$resolved_path" ]; then
+        # Resolve links until we find a non-link file or the target file is found
+        if [ ! -x "$resolved_path" ]; then
+          resolve_links "$resolved_path"
+        else
+          echo "$resolved_path"
+          return
+        fi
+      else
+        # Return the original link
+        echo "$cmd"
+        return
+      fi
+    else
+      # This is not a link and we don't know what it is
+      echo "$cmd"
+      return
+    fi
+  done
+  echo "Path to executable not found: $cmd"
+  return 1
+}
+
+# Resolve command path
+resolve_cmd_path() {
+  cmd_path=$(resolve_links "$1")
+
+  if [ $? -ne 0 ]; then
+    return 1
+  fi
+
+  if [ -f "$cmd_path" ]; then
+    echo "$cmd_path"
+    return 0
+  fi
+
+  # For Windows compatibility
+  cmd_path=$(command -v "dirname \"$cmd_path\"")
+  if [ $? -eq 0 ]; then
+    echo "$cmd_path"
+    return 0
+  fi
+  echo "Path to executable not found: $1"
+  return 1
+}
+
+# Launch the application
+app_path=$(resolve_cmd_path "$0" "$@")
+if [ $? -ne 0 ]; then
+  echo "Error: Could not find Java executable"
+  exit 1
+fi
+
+# Call the Gradle script
+exec "$app_path" "$@"
