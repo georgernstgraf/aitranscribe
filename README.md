@@ -1,22 +1,32 @@
 # aitranscribe
 
-A powerful CLI tool for audio transcription and LLM post-processing, powered by **Groq** for lightning-fast STT and **OpenRouter** for LLM post-processing.
+A powerful CLI tool and Android app for audio transcription and LLM post-processing, powered by **GROQ** for lightning-fast STT and **OpenRouter** for LLM post-processing.
 
 ## 🚀 Features
 
 * **🎙️ Microphone Recording:** Capture audio directly from your terminal using a push-to-talk mechanism (Hold SPACE to record).
 * **📁 File Transcription:** Process local audio and video files (`.mp3`, `.wav`, `.mp4`, `.m4a`, etc.) using Groq's whisper models.
-* **✂️ Auto-Chunking:** Automatically splits large audio files to bypass standard API file size limits (Groq currently limits audio files to 25MB).
+* **✂️ Auto-Chunking:** Automatically splits large audio files to bypass standard API file size limits (GROQ currently limits audio files to 25MB).
 * **✨ LLM Post-Processing:** Refine your transcriptions using OpenRouter LLMs for grammar correction, summarization, or translation.
 * **📜 Prompt Management:** Local queue to store and retrieve transcription history for easy access and processing.
 
 ## 🛠️ Technology Stack
 
+### CLI (Python)
 * **Language:** Python 3.12+
 * **CLI Framework:** [Typer](https://typer.tiangolo.com/) for a modern, clean command-line interface.
 * **UI/Output:** [Rich](https://rich.readthedocs.io/) for beautiful console output, progress bars, and Markdown rendering.
 * **Audio Processing:** [pydub](https://github.com/jiaaro/pydub) for handling various audio formats and chunking large files.
 * **Microphone Capture:** `sounddevice`, `soundfile`, and `pynput` for cross-platform push-to-talk recording (supports Windows via `msvcrt` fallback).
+
+### Android App (Kotlin)
+* **Language:** Kotlin
+* **UI:** Jetpack Compose (Material 3)
+* **Database:** Room (SQLite)
+* **Dependency Injection:** Hilt
+* **Networking:** Retrofit + OkHttp
+* **Background Processing:** WorkManager
+* **Distribution:** F-Droid (FOSS)
 
 ## 📋 Prerequisites
 
@@ -154,6 +164,25 @@ The project follows clean code principles with focus on maintainability and test
 * **Shared Logic Helpers:** Common operations are extracted into reusable utility functions.
 * **Comprehensive Testing:** Unit and integration tests cover core logic and CLI interactions.
 * **Single Source of Truth:** CLI parameters and configuration are centralized.
+
+## 📱 Android App
+
+An Android version of AITranscribe is also available in the `android/` subdirectory. See [android/README.md](android/README.md) for details.
+
+**Features:**
+- Push-to-talk recording
+- GROQ STT + OpenRouter LLM processing
+- SQLite storage with view status tracking
+- Search with date range and text filters
+- Offline queue support
+- Background transcription
+- Dark/Light theme support
+
+**Building:**
+```bash
+cd android
+./gradlew assembleDebug
+```
 
 ## 📄 License
 
