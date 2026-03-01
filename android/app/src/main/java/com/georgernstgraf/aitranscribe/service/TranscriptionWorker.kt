@@ -13,6 +13,7 @@ import com.georgernstgraf.aitranscribe.domain.model.TranscriptionStatus
 import com.georgernstgraf.aitranscribe.util.NotificationManager
 import com.georgernstgraf.aitranscribe.util.NetworkMonitor
 import dagger.assisted.Assisted
+import dagger.assisted.AssistedInject
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -27,8 +28,8 @@ import javax.inject.Inject
  */
 @HiltWorker
 class TranscriptionWorker @AssistedInject constructor(
-    @Assisted context: Context,
-    @Assisted params: WorkerParameters,
+    @Assisted private val context: Context,
+    @Assisted private val params: WorkerParameters,
     private val repository: TranscriptionRepository,
     private val groqApiService: GroqApiService,
     private val networkMonitor: NetworkMonitor,

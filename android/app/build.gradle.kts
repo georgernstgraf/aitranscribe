@@ -120,10 +120,12 @@ dependencies {
     // WorkManager
     implementation("androidx.work:work-runtime-ktx:2.9.0")
     implementation("androidx.hilt:hilt-work:1.1.0")
-    kapt("androidx.hilt:hilt-compiler:1.1.0")
+    ksp("androidx.hilt:hilt-compiler:1.1.0")
 
-    // Audio Processing (FFmpeg - FOSS)
-    implementation("com.arthenica:ffmpeg-kit:6.0-2")
+    // Audio Processing (FFmpeg - FOSS) - TEMPORARILY DISABLED
+    // ffmpeg-kit is archived and not available in public Maven repositories
+    // TODO: Add ffmpeg-kit as local module or find alternative
+    // implementation("com.github.arthenica:ffmpeg-kit:6.0-2")
 
     // Crash Reporting (ACRA - FOSS)
     implementation("ch.acra:acra-http:5.11.3")

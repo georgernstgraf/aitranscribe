@@ -69,7 +69,7 @@ fun StatisticsCard(
             ) {
                 StatItem(
                     label = "Total",
-                    value = totalCount.toString()
+                    value = totalCount.toString(),
                     icon = androidx.compose.material.icons.Icons.Default.List
                 )
 

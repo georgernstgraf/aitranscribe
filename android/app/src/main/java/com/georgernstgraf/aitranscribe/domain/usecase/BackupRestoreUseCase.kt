@@ -2,6 +2,7 @@ package com.georgernstgraf.aitranscribe.domain.usecase
 
 import com.georgernstgraf.aitranscribe.data.local.AppPreferencesEntity
 import com.georgernstgraf.aitranscribe.data.repository.AppPreferencesRepository
+import com.georgernstgraf.aitranscribe.util.FilePicker
 import com.google.gson.Gson
 import dagger.hilt.android.scopes.ViewModelScoped
 import kotlinx.coroutines.Dispatchers

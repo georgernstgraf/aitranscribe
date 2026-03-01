@@ -33,7 +33,7 @@ interface QueuedTranscriptionDao {
     fun getNextFlow(): Flow<QueuedTranscriptionEntity?>
 
     @Query("""
-        SELECT * FROM queued_transcriptions 
+        SELECT * FROM queued_transcriptions
         ORDER BY created_at ASC, priority DESC
     """)
     fun getAll(): Flow<List<QueuedTranscriptionEntity>>

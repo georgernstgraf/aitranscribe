@@ -10,6 +10,7 @@ import androidx.core.graphics.drawable.IconCompat
 import com.georgernstgraf.aitranscribe.R
 import dagger.hilt.android.qualifiers.ApplicationContext
 import javax.inject.Inject
+import javax.inject.Singleton
 
 /**
  * Enhanced notification manager.

@@ -1,13 +1,14 @@
 package com.georgernstgraf.aitranscribe.ui.viewmodel
 
 import android.content.Context
-import android.provider.Settings
+import android.provider.Settings as AndroidSettings
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.georgernstgraf.aitranscribe.domain.model.DeleteMode
 import com.georgernstgraf.aitranscribe.domain.model.ViewFilter
 import com.georgernstgraf.aitranscribe.domain.usecase.DeleteTranscriptionUseCase
 import dagger.hilt.android.lifecycle.HiltViewModel
+import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow

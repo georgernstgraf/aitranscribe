@@ -54,14 +54,14 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        
+
         setContent {
             AITranscribeTheme {
                 Surface(
                     modifier = Modifier.fillMaxSize(),
                     color = MaterialTheme.colorScheme.background
                 ) {
-                    MainNavigation()
+                    MainNavigation(mainViewModel)
                 }
             }
         }
@@ -85,7 +85,7 @@ class MainActivity : ComponentActivity() {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun MainNavigation() {
+fun MainNavigation(mainViewModel: MainViewModel) {
     val navController = rememberNavController()
     val state by mainViewModel.uiState.collectAsState()
 
@@ -150,13 +150,13 @@ fun MainNavigation() {
                                 )
                             }
                         }
+                    } else {
+                        Text(
+                            text = "No transcriptions yet. Record your first one!",
+                            style = MaterialTheme.typography.bodyLarge,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
                     }
-                } else {
-                    Text(
-                        text = "No transcriptions yet. Record your first one!",
-                        style = MaterialTheme.typography.bodyLarge,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
                 }
             }
         }
