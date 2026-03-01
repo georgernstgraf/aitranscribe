@@ -1,5 +1,6 @@
 package com.georgernstgraf.aitranscribe.util
 
+import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
 import androidx.core.app.NotificationChannelGroupCompat
@@ -115,7 +116,7 @@ class EnhancedNotificationManager @Inject constructor(
         val notification = NotificationCompat.Builder(context, CHANNEL_RECORDING_ACTIVE)
             .setContentTitle("Recording Active")
             .setContentText("Duration: ${duration}s")
-            .setSmallIcon(R.drawable.ic_launcher_foreground)
+            .setSmallIcon(R.drawable.ic_launcher)
             .setOngoing(true)
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .setCategory(NotificationCompat.CATEGORY_PROGRESS)
@@ -136,7 +137,7 @@ class EnhancedNotificationManager @Inject constructor(
         val notification = NotificationCompat.Builder(context, CHANNEL_TRANSCRIPTION_PROGRESS)
             .setContentTitle("Transcribing...")
             .setContentText("$progress% complete")
-            .setSmallIcon(R.drawable.ic_launcher_foreground)
+            .setSmallIcon(R.drawable.ic_launcher)
             .setOngoing(true)
             .setPriority(NotificationCompat.PRIORITY_DEFAULT)
             .setCategory(NotificationCompat.CATEGORY_PROGRESS)
@@ -158,14 +159,14 @@ class EnhancedNotificationManager @Inject constructor(
             .setContentTitle("Transcription Complete")
             .setContentText(text.take(50))
             .setStyle(NotificationCompat.BigTextStyle().bigText(text))
-            .setSmallIcon(R.drawable.ic_launcher_foreground)
+            .setSmallIcon(R.drawable.ic_launcher)
             .setPriority(NotificationCompat.PRIORITY_HIGH)
             .setCategory(NotificationCompat.CATEGORY_MESSAGE)
             .setGroup(GROUP_ID_TRANSCRIPTION)
             .setAutoCancel(true)
             .addAction(
                 NotificationCompat.Action(
-                    R.drawable.ic_launcher_foreground,
+                    R.drawable.ic_launcher,
                     "Copy",
                     PendingIntent.getActivity(
                         context,
@@ -192,7 +193,7 @@ class EnhancedNotificationManager @Inject constructor(
             .setContentTitle(title)
             .setContentText(message)
             .setStyle(NotificationCompat.BigTextStyle().bigText(message))
-            .setSmallIcon(R.drawable.ic_launcher_foreground)
+            .setSmallIcon(R.drawable.ic_launcher)
             .setPriority(NotificationCompat.PRIORITY_HIGH)
             .setCategory(NotificationCompat.CATEGORY_ERROR)
             .setGroup(GROUP_ID_TRANSCRIPTION)

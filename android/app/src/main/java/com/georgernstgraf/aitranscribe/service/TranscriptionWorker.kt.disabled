@@ -23,7 +23,7 @@ import java.time.format.DateTimeFormatter
 import javax.inject.Inject
 
 /**
- * Worker for processing transcriptions in the background.
+ * Worker for processing transcriptions in background.
  * Handles offline queue processing with notifications.
  */
 @HiltWorker
