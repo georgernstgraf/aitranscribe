@@ -369,7 +369,7 @@ def main(
     if query_prompt:
         retrieved_prompt = prompt_manager.query_prompt()
         if retrieved_prompt:
-            console.print(retrieved_prompt)
+            console.print(wrap_text(retrieved_prompt))
         raise typer.Exit(code=0)
 
     if file:
@@ -450,7 +450,7 @@ def transcribe_file(file_path: str, stt_model: str, llm_model: str, post_process
             final_text = " ".join(t for t in full_transcript if t).strip()
 
         console.print("\nTranscription Complete:")
-        console.print(final_text)
+        console.print(wrap_text(final_text))
 
         # 3. Post-Processing
         if prompt:
@@ -468,7 +468,7 @@ def transcribe_file(file_path: str, stt_model: str, llm_model: str, post_process
                 llm_result = process_with_llm(llm_client, final_text, prompt, llm_model)
 
             console.print("\nLLM Result:")
-            console.print(llm_result)
+            console.print(wrap_text(llm_result))
 
             # Store LLM result in prompt queue
             prompt_manager.add_prompt(llm_result, file_path)
@@ -717,7 +717,7 @@ def record_from_microphone(stt_model: str, llm_model: str, post_process: bool, v
             transcript = transcribe_audio(stt_client, final_mp3_file, stt_model)
 
         console.print("\nTranscription Complete:")
-        console.print(transcript)
+        console.print(wrap_text(transcript))
 
         # Post-Processing
         if prompt:
@@ -735,7 +735,7 @@ def record_from_microphone(stt_model: str, llm_model: str, post_process: bool, v
                 llm_result = process_with_llm(llm_client, transcript, prompt, llm_model)
 
             console.print("\nLLM Result:")
-            console.print(llm_result)
+            console.print(wrap_text(llm_result))
 
             # Store LLM result in prompt queue
             prompt_manager.add_prompt(llm_result, final_mp3_file)
