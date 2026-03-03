@@ -98,7 +98,6 @@ def _migrate_config() -> None:
             f.write('\n# z.ai (alternative provider)\n')
             f.write('# ZAI_API_KEY="your_zai_api_key_here"\n')
             f.write('# ZAI_LLM_MODEL="glm-5"\n')
-    console.print(f"Updated configuration at {CONFIG_FILE}")
 
 if not CONFIG_FILE.exists():
     _create_default_config()
@@ -455,8 +454,11 @@ def transcribe_file(file_path: str, stt_model: str, llm_model: str, post_process
     validate_api_keys(prompt)
 
     console.print(f"Preparing to transcribe file: {file_path}")
+    console.print(f"STT Provider: Groq")
     console.print(f"STT Model: {stt_model}")
-    console.print(f"LLM Model: {llm_model}")
+    if prompt:
+        console.print(f"LLM Provider: {LLM_PROVIDER}")
+        console.print(f"LLM Model: {llm_model}")
 
     if not os.path.exists(file_path):
         console.print(f"Error: File not found: {file_path}")
@@ -519,9 +521,7 @@ def transcribe_file(file_path: str, stt_model: str, llm_model: str, post_process
 
         # 3. Post-Processing
         if prompt:
-            console.print(f"\nApplying LLM Post-Processing...")
-            console.print(f"Prompt: {prompt}")
-            console.print(f"Model: {llm_model}")
+            console.print(f"\nPrompt: {prompt}")
 
             with Progress(
                 TextColumn("{task.description}"),
@@ -564,8 +564,11 @@ def record_from_microphone(stt_model: str, llm_model: str, post_process: bool, v
     audio_data = []
 
     console.print("Push-to-Talk Recording")
+    console.print(f"STT Provider: Groq")
     console.print(f"STT Model: {stt_model}")
-    console.print(f"LLM Model: {llm_model}")
+    if prompt:
+        console.print(f"LLM Provider: {LLM_PROVIDER}")
+        console.print(f"LLM Model: {llm_model}")
     console.print("Hold SPACE to record. Release to stop. Press ESC to cancel.")
 
     # Shared state for the listener
@@ -786,9 +789,7 @@ def record_from_microphone(stt_model: str, llm_model: str, post_process: bool, v
 
         # Post-Processing
         if prompt:
-            console.print(f"\nApplying LLM Post-Processing...")
-            console.print(f"Prompt: {prompt}")
-            console.print(f"Model: {llm_model}")
+            console.print(f"\nPrompt: {prompt}")
 
             with Progress(
                 TextColumn("{task.description}"),
