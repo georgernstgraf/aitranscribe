@@ -1,13 +1,13 @@
 # aitranscribe
 
-A powerful CLI tool and Android app for audio transcription and LLM post-processing, powered by **GROQ** for lightning-fast STT and **OpenRouter** for LLM post-processing.
+A powerful CLI tool and Android app for audio transcription and LLM post-processing, powered by **GROQ** for lightning-fast STT and multiple LLM providers for post-processing.
 
 ## 🚀 Features
 
 * **🎙️ Microphone Recording:** Capture audio directly from your terminal using a push-to-talk mechanism (Hold SPACE to record).
 * **📁 File Transcription:** Process local audio and video files (`.mp3`, `.wav`, `.mp4`, `.m4a`, etc.) using Groq's whisper models.
 * **✂️ Auto-Chunking:** Automatically splits large audio files to bypass standard API file size limits (GROQ currently limits audio files to 25MB).
-* **✨ LLM Post-Processing:** Refine your transcriptions using OpenRouter LLMs for grammar correction, summarization, or translation.
+* **✨ LLM Post-Processing:** Refine your transcriptions using LLMs for grammar correction, summarization, or translation. Supports OpenRouter, Cohere, and z.ai.
 * **📜 Prompt Management:** Local queue to store and retrieve transcription history for easy access and processing.
 
 ## 🛠️ Technology Stack
@@ -91,12 +91,49 @@ On the first run, the tool will automatically create a template for you.
 
 2. Add your API keys and preferred models:
 
+   **Example 1: OpenRouter (default)**
    ```env
+   # Speech-to-Text Configuration
    GROQ_API_KEY="your_groq_api_key_here"
-   OPENROUTER_API_KEY="your_openrouter_api_key_here"
    GROQ_STT_MODEL="whisper-large-v3-turbo"
+
+   # LLM Post-Processing Configuration
+   LLM_PROVIDER="openrouter"
+   OPENROUTER_API_KEY="your_openrouter_api_key_here"
    OPENROUTER_LLM_MODEL="anthropic/claude-3-haiku"
    ```
+
+   **Example 2: Cohere with GLM-5**
+   ```env
+   # Speech-to-Text Configuration
+   GROQ_API_KEY="your_groq_api_key_here"
+   GROQ_STT_MODEL="whisper-large-v3-turbo"
+
+   # LLM Post-Processing Configuration
+   LLM_PROVIDER="cohere"
+   COHERE_API_KEY="your_cohere_api_key_here"
+   COHERE_LLM_MODEL="glm-5"
+   ```
+
+   **Example 3: z.ai**
+   ```env
+   # Speech-to-Text Configuration
+   GROQ_API_KEY="your_groq_api_key_here"
+   GROQ_STT_MODEL="whisper-large-v3-turbo"
+
+   # LLM Post-Processing Configuration
+   LLM_PROVIDER="z.ai"
+   ZAI_API_KEY="your_zai_api_key_here"
+   ZAI_LLM_MODEL="glm-5"
+   ```
+
+### Supported LLM Providers
+
+| Provider | `LLM_PROVIDER` value | Default Model |
+|----------|---------------------|---------------|
+| OpenRouter | `openrouter` | `anthropic/claude-3-haiku` |
+| Cohere | `cohere` | `command-r` |
+| z.ai | `z.ai` | `glm-5` |
 
 ## 🎯 Usage Examples
 

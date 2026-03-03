@@ -23,62 +23,126 @@ from core import chunk_audio, transcribe_audio, process_with_llm, compress_audio
 console = Console(highlight=False, color_system=None)
 state = {"verbose": False}
 
-# Configuration Directory
+LLM_PROVIDERS = {
+    "openrouter": {
+        "base_url": "https://openrouter.ai/api/v1",
+        "env_key": "OPENROUTER_API_KEY",
+        "env_model": "OPENROUTER_LLM_MODEL",
+        "default_model": "anthropic/claude-3-haiku",
+    },
+    "cohere": {
+        "base_url": "https://api.cohere.ai/compatibility/v1",
+        "env_key": "COHERE_API_KEY",
+        "env_model": "COHERE_LLM_MODEL",
+        "default_model": "command-r",
+    },
+    "z.ai": {
+        "base_url": "https://open.bigmodel.cn/api/paas/v4",
+        "env_key": "ZAI_API_KEY",
+        "env_model": "ZAI_LLM_MODEL",
+        "default_model": "glm-5",
+    },
+}
+
 if os.name == 'nt':
-    # Windows: %APPDATA%\aitranscribe
     appdata = os.getenv('APPDATA')
     if appdata:
         CONFIG_DIR = Path(appdata) / "aitranscribe"
     else:
         CONFIG_DIR = Path.home() / "AppData" / "Roaming" / "aitranscribe"
 else:
-    # Linux/macOS: ~/.config/aitranscribe
     CONFIG_DIR = Path.home() / ".config" / "aitranscribe"
 
 CONFIG_FILE = CONFIG_DIR / "config"
 PROMPTS_FILE = CONFIG_DIR / "prompts.sqlite"
 
-# Create default config if it doesn't exist
-if not CONFIG_FILE.exists() or "GROQ_API_KEY" not in CONFIG_FILE.read_text():
+def _create_default_config() -> None:
     CONFIG_DIR.mkdir(parents=True, exist_ok=True)
-    # If file exists but is missing Groq keys (migration), append them
-    mode = "a" if CONFIG_FILE.exists() else "w"
-    with open(CONFIG_FILE, mode) as f:
-        if mode == "w":
-            f.write('GROQ_API_KEY="your_groq_api_key_here"\n')
-            f.write('OPENROUTER_API_KEY="your_openrouter_api_key_here"\n')
-        else:
-            f.write('\n# Added during Groq migration\n')
-            f.write('GROQ_API_KEY="your_groq_api_key_here"\n')
+    with open(CONFIG_FILE, "w") as f:
+        f.write('# Speech-to-Text Configuration\n')
+        f.write('GROQ_API_KEY="your_groq_api_key_here"\n')
         f.write('GROQ_STT_MODEL="whisper-large-v3-turbo"\n')
-        if mode == "w":
-            f.write('OPENROUTER_LLM_MODEL="anthropic/claude-3-haiku"\n')
-        f.write(f'PROMPTS_FILE="{PROMPTS_FILE}"\n')
-    console.print(f"Updated/Created configuration at {CONFIG_FILE}")
+        f.write('\n# LLM Post-Processing Configuration\n')
+        f.write('LLM_PROVIDER="openrouter"\n')
+        f.write('\n# OpenRouter (default provider)\n')
+        f.write('OPENROUTER_API_KEY="your_openrouter_api_key_here"\n')
+        f.write('OPENROUTER_LLM_MODEL="anthropic/claude-3-haiku"\n')
+        f.write('\n# Cohere (alternative provider)\n')
+        f.write('# COHERE_API_KEY="your_cohere_api_key_here"\n')
+        f.write('# COHERE_LLM_MODEL="command-r"\n')
+        f.write('\n# z.ai (alternative provider)\n')
+        f.write('# ZAI_API_KEY="your_zai_api_key_here"\n')
+        f.write('# ZAI_LLM_MODEL="glm-5"\n')
+        f.write(f'\nPROMPTS_FILE="{PROMPTS_FILE}"\n')
+    console.print(f"Created configuration at {CONFIG_FILE}")
     console.print("Please edit this file to add your API keys before running the tool.")
 
-# Load environment variables from global config
+def _migrate_config() -> None:
+    config_text = CONFIG_FILE.read_text()
+    if "GROQ_API_KEY" not in config_text:
+        with open(CONFIG_FILE, "a") as f:
+            f.write('\n# Added during migration\n')
+            f.write('GROQ_API_KEY="your_groq_api_key_here"\n')
+            f.write('GROQ_STT_MODEL="whisper-large-v3-turbo"\n')
+    if "LLM_PROVIDER" not in config_text:
+        with open(CONFIG_FILE, "a") as f:
+            f.write('\n# Added during multi-provider migration\n')
+            f.write('LLM_PROVIDER="openrouter"\n')
+    if "COHERE_API_KEY" not in config_text:
+        with open(CONFIG_FILE, "a") as f:
+            f.write('\n# Cohere (alternative provider)\n')
+            f.write('# COHERE_API_KEY="your_cohere_api_key_here"\n')
+            f.write('# COHERE_LLM_MODEL="command-r"\n')
+    if "ZAI_API_KEY" not in config_text:
+        with open(CONFIG_FILE, "a") as f:
+            f.write('\n# z.ai (alternative provider)\n')
+            f.write('# ZAI_API_KEY="your_zai_api_key_here"\n')
+            f.write('# ZAI_LLM_MODEL="glm-5"\n')
+    console.print(f"Updated configuration at {CONFIG_FILE}")
+
+if not CONFIG_FILE.exists():
+    _create_default_config()
+else:
+    _migrate_config()
+
 load_dotenv(dotenv_path=CONFIG_FILE)
 
 PROMPTS_FILE = Path(os.getenv("PROMPTS_FILE", str(PROMPTS_FILE)))
 
-# API Keys and Models
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
-OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
 GROQ_STT_MODEL = os.getenv("GROQ_STT_MODEL", "whisper-large-v3-turbo")
-OPENROUTER_LLM_MODEL = os.getenv("OPENROUTER_LLM_MODEL", "anthropic/claude-3-haiku")
+LLM_PROVIDER = os.getenv("LLM_PROVIDER", "openrouter").lower()
 
-# Initialize OpenAI client pointing to Groq for STT
+def _get_llm_client() -> OpenAI | None:
+    if LLM_PROVIDER not in LLM_PROVIDERS:
+        console.print(f"Warning: Unknown LLM_PROVIDER '{LLM_PROVIDER}', falling back to 'openrouter'")
+        provider = LLM_PROVIDERS["openrouter"]
+    else:
+        provider = LLM_PROVIDERS[LLM_PROVIDER]
+    
+    api_key = os.getenv(provider["env_key"])
+    if not api_key or api_key == f"your_{LLM_PROVIDER}_api_key_here":
+        return None
+    
+    return OpenAI(
+        base_url=provider["base_url"],
+        api_key=api_key,
+    )
+
+def _get_llm_model() -> str:
+    if LLM_PROVIDER not in LLM_PROVIDERS:
+        provider = LLM_PROVIDERS["openrouter"]
+    else:
+        provider = LLM_PROVIDERS[LLM_PROVIDER]
+    return os.getenv(provider["env_model"], provider["default_model"])
+
 stt_client = OpenAI(
     base_url="https://api.groq.com/openai/v1",
     api_key=GROQ_API_KEY,
 ) if GROQ_API_KEY and GROQ_API_KEY != "your_groq_api_key_here" else None
 
-# Initialize OpenAI client pointing to OpenRouter for LLM
-llm_client = OpenAI(
-    base_url="https://openrouter.ai/api/v1",
-    api_key=OPENROUTER_API_KEY,
-) if OPENROUTER_API_KEY and OPENROUTER_API_KEY != "your_openrouter_api_key_here" else None
+llm_client = _get_llm_client()
+LLM_MODEL = _get_llm_model()
 
 # Option Factory Functions
 def post_process_option():
@@ -88,7 +152,7 @@ def stt_model_option():
     return typer.Option(GROQ_STT_MODEL, help="Groq STT model to use")
 
 def llm_model_option():
-    return typer.Option(OPENROUTER_LLM_MODEL, "--llm-model", "-m", help="OpenRouter LLM model to use")
+    return typer.Option(LLM_MODEL, "--llm-model", "-m", help="LLM model to use for post-processing")
 
 def verbose_option():
     return typer.Option(False, "--verbose", "-v", help="Show verbose error outputs")
@@ -146,7 +210,8 @@ def validate_api_keys(post_process: str | None) -> None:
         raise typer.Exit(code=1)
 
     if post_process and not llm_client:
-        console.print(f"Error: OPENROUTER_API_KEY is not set but needed for post-processing.")
+        provider_key = LLM_PROVIDERS.get(LLM_PROVIDER, LLM_PROVIDERS["openrouter"])["env_key"]
+        console.print(f"Error: {provider_key} is not set but needed for post-processing. Set LLM_PROVIDER and the corresponding API key in {CONFIG_FILE}.")
         raise typer.Exit(code=1)
 
 def wrap_text(text: str, max_length: int = 80) -> str:
@@ -317,7 +382,7 @@ prompt_manager = PromptManager(PROMPTS_FILE)
 
 # Typer App
 app = typer.Typer(
-    help="aitranscribe: CLI tool for STT and LLM post-processing via OpenRouter.",
+    help="aitranscribe: CLI tool for STT and LLM post-processing via multiple providers.",
     context_settings={"help_option_names": ["-h", "--help"]},
     add_completion=False,
     rich_markup_mode=None,
@@ -340,7 +405,7 @@ def main(
     help: bool = help_option(),
 ):
     """
-    aitranscribe: CLI tool for STT and LLM post-processing via OpenRouter.
+    aitranscribe: CLI tool for STT and LLM post-processing.
     """
     if help:
         typer.echo(ctx.get_help())
@@ -378,7 +443,7 @@ def main(
         record_from_microphone(stt_model, llm_model, post_process, verbose, english, new)
 
 def transcribe_file(file_path: str, stt_model: str, llm_model: str, post_process: bool, verbose: bool, english: bool, new: bool):
-    """Transcribe a local audio or video file using Groq STT and optionally process with OpenRouter LLM."""
+    """Transcribe a local audio or video file using Groq STT and optionally process with LLM."""
     if verbose:
         state["verbose"] = True
 
