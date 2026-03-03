@@ -563,15 +563,21 @@ def record_from_microphone(stt_model: str, llm_model: str, post_process: bool, v
     channels = 1
     audio_data = []
 
-    console.print("Push-to-Talk Recording")
+    is_wayland = os.getenv("XDG_SESSION_TYPE", "").lower() == "wayland"
+    recording_mode = "Toggle" if is_wayland else "Push-to-Talk"
+
+    console.print(f"{recording_mode} Recording")
     console.print(f"STT Provider: Groq")
     console.print(f"STT Model: {stt_model}")
     if prompt:
         console.print(f"LLM Provider: {LLM_PROVIDER}")
         console.print(f"LLM Model: {llm_model}")
-    console.print("Hold SPACE to record. Release to stop. Press ESC to cancel.")
+    
+    if is_wayland:
+        console.print("Press SPACE to start recording. Press SPACE again to stop. Press ESC to cancel.")
+    else:
+        console.print("Hold SPACE to record. Release to stop. Press ESC to cancel.")
 
-    # Shared state for the listener
     recording_state = {
         "is_recording": False,
         "stop_event": False,
@@ -580,9 +586,14 @@ def record_from_microphone(stt_model: str, llm_model: str, post_process: bool, v
 
     def on_press(key: keyboard.Key | keyboard.KeyCode | None) -> Any:
         if key == keyboard.Key.space:
-            if not recording_state["is_recording"]:
-                recording_state["is_recording"] = True
-                # UI is handled in the main loop
+            if is_wayland:
+                recording_state["is_recording"] = not recording_state["is_recording"]
+                if not recording_state["is_recording"]:
+                    recording_state["stop_event"] = True
+                    return False
+            else:
+                if not recording_state["is_recording"]:
+                    recording_state["is_recording"] = True
         elif key == keyboard.Key.esc:
             recording_state["stop_event"] = True
             recording_state["cancelled"] = True
@@ -590,7 +601,7 @@ def record_from_microphone(stt_model: str, llm_model: str, post_process: bool, v
         return None
 
     def on_release(key: keyboard.Key | keyboard.KeyCode | None) -> Any:
-        if key == keyboard.Key.space:
+        if not is_wayland and key == keyboard.Key.space:
             if recording_state["is_recording"]:
                 recording_state["is_recording"] = False
                 recording_state["stop_event"] = True
@@ -598,20 +609,19 @@ def record_from_microphone(stt_model: str, llm_model: str, post_process: bool, v
         return None
 
     listener = None
-    try:
-        listener = keyboard.Listener(on_press=on_press, on_release=on_release, suppress=True)  # type: ignore
-        listener.start()
-    except Exception as e:
-        if verbose:
-            console.print(f"Warning: Could not start pynput listener: {e}")
-        console.print("Falling back to toggle-mode recording (press SPACE to start/stop).")
-        # Fallback to termios/msvcrt handled below by checking if listener is None
+    if not is_wayland:
+        try:
+            listener = keyboard.Listener(on_press=on_press, on_release=on_release, suppress=True)
+            listener.start()
+        except Exception as e:
+            if verbose:
+                console.print(f"Warning: Could not start pynput listener: {e}")
+            console.print("Falling back to toggle-mode recording (press SPACE to start/stop).")
+            listener = None
 
     fd = None
     old_settings = None
 
-    # Try to set up terminal to disable echo and canonical mode regardless of listener type
-    # This prevents auto-repeat from flooding the terminal buffer
     if os.name != 'nt':
         try:
             import termios
@@ -627,7 +637,6 @@ def record_from_microphone(stt_model: str, llm_model: str, post_process: bool, v
             pass
 
     if listener is None:
-        # Check if we can at least use msvcrt (Windows) or termios (Unix)
         if os.name == 'nt' or fd is not None:
             console.print("Press SPACE to start, SPACE again to stop. Press ESC to cancel.")
         else:
