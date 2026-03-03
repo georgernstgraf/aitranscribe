@@ -37,7 +37,7 @@ LLM_PROVIDERS = {
         "default_model": "command-r",
     },
     "z.ai": {
-        "base_url": "https://api.z.ai/api/paas/v4",
+        "base_url": "https://api.z.ai/api/coding/paas/v4",
         "env_key": "ZAI_API_KEY",
         "env_model": "ZAI_LLM_MODEL",
         "default_model": "glm-5",
