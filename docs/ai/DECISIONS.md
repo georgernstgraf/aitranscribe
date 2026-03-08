@@ -20,3 +20,9 @@ Each entry documents WHAT was decided and WHY.
 - **Reason**: The project already relies on terminal UI libraries, and `Textual` provides panels, focus handling, bindings, and async worker patterns needed for a real TUI.
 - **Considered**: Expanding ad-hoc `Rich` console output into a pseudo-TUI.
 - **Tradeoff**: Adds a new runtime dependency and a separate UI module to maintain.
+
+## 2026-03-09: Keep Textual And Add Explicit Clipboard Copy
+- **Choice**: Keep the `Textual` TUI and add explicit transcript copy support via `C`, using system clipboard tools first and OSC52 as a fallback.
+- **Reason**: Real-world testing showed visible mouse selection inside the fullscreen TUI did not produce pasteable system clipboard content even in `kitty`, so copyability needed an app-level path.
+- **Considered**: Switching terminals, relying on terminal settings, or abandoning the TUI immediately.
+- **Tradeoff**: Mouse selection still is not the primary copy workflow; users need an explicit copy action.
