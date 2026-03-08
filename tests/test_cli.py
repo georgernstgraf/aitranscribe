@@ -31,6 +31,8 @@ try:
         cleanup_old_records,
         validate_api_keys,
         wrap_text,
+        get_pre_process_prompt,
+        launch_tui,
         console,
         CONFIG_FILE,
         stt_client,
@@ -63,6 +65,14 @@ def test_cli_file_missing_arg():
     assert result.exit_code != 0
     assert "File not found" in result.stdout
     assert "/tmp/aitranscribe_record.mp3" in result.stdout
+
+
+def test_cli_defaults_to_tui_launch():
+    """Test that running without arguments launches the TUI."""
+    with patch("main.launch_tui") as mock_launch_tui:
+        result = runner.invoke(app, [])
+        assert result.exit_code == 0
+        mock_launch_tui.assert_called_once()
 
 
 # ==================== Option Factory Tests ====================
@@ -145,6 +155,16 @@ def test_get_post_process_prompt_none():
     """Test no post-processing."""
     result = get_post_process_prompt(english=False, post_process=False)
     assert result is None
+
+def test_get_pre_process_prompt_modes():
+    """Test TUI preprocessing mode mapping."""
+    assert get_pre_process_prompt("raw") is None
+    cleanup_prompt = get_pre_process_prompt("cleanup")
+    english_prompt = get_pre_process_prompt("english")
+    assert cleanup_prompt is not None
+    assert english_prompt is not None
+    assert "correct grammatical errors" in cleanup_prompt
+    assert "translate the following text to English" in english_prompt
 
 def test_cleanup_old_records():
     """Test that cleanup_old_records deletes matching files."""
@@ -423,5 +443,26 @@ def test_promptmanager_remove_prompt_success():
         assert len(manager.prompts) == 2
         assert manager.prompts[0]['prompt'] == "First prompt"
         assert manager.prompts[1]['prompt'] == "Third prompt"
+    finally:
+        temp_file.unlink()
+
+
+def test_promptmanager_mark_all_read():
+    """Test PromptManager.mark_all_read marks every unread prompt."""
+    with tempfile.NamedTemporaryFile(mode='w', suffix='.sqlite', delete=False) as f:
+        temp_file = Path(f.name)
+
+    try:
+        manager = PromptManager(temp_file)
+        manager.add_prompt("First prompt", "file1.mp3")
+        manager.add_prompt("Second prompt", "file2.mp3")
+
+        marked = manager.mark_all_read()
+
+        assert marked == 2
+        assert manager.count_unplayed() == 0
+        with sqlite3.connect(temp_file) as conn:
+            rows = conn.execute("SELECT played_count FROM prompts ORDER BY id ASC").fetchall()
+            assert rows == [(1,), (1,)]
     finally:
         temp_file.unlink()

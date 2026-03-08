@@ -1,21 +1,22 @@
 # aitranscribe
 
-A powerful CLI tool and Android app for audio transcription and LLM post-processing, powered by **GROQ** for lightning-fast STT and multiple LLM providers for post-processing.
+A TUI-first terminal app and Android app for audio transcription and LLM post-processing, powered by **GROQ** for lightning-fast STT and multiple LLM providers for post-processing.
 
 ## 🚀 Features
 
-* **🎙️ Microphone Recording:** Capture audio directly from your terminal using a push-to-talk mechanism (Hold SPACE to record).
+* **🖥️ Rich TUI:** Starts in a framed terminal UI with dedicated status, transcript, feedback log, and configuration panels.
+* **🎙️ Toggle Recording:** Start recording with **SPACE** and finish with **SPACE** again, regardless of Wayland or X11.
 * **📁 File Transcription:** Process local audio and video files (`.mp3`, `.wav`, `.mp4`, `.m4a`, etc.) using Groq's whisper models.
 * **✂️ Auto-Chunking:** Automatically splits large audio files to bypass standard API file size limits (GROQ currently limits audio files to 25MB).
 * **✨ LLM Post-Processing:** Refine your transcriptions using LLMs for grammar correction, summarization, or translation. Supports OpenRouter, Cohere, and z.ai.
-* **📜 Prompt Management:** Local queue to store and retrieve transcription history for easy access and processing.
+* **📜 Prompt Management:** Local queue to store transcription history, review unread items, and mark all transcriptions as read from the TUI.
 
 ## 🛠️ Technology Stack
 
 ### CLI (Python)
 * **Language:** Python 3.12+
 * **CLI Framework:** [Typer](https://typer.tiangolo.com/) for a modern, clean command-line interface.
-* **UI/Output:** [Rich](https://rich.readthedocs.io/) for beautiful console output, progress bars, and Markdown rendering.
+* **UI/Output:** [Rich](https://rich.readthedocs.io/) and [Textual](https://textual.textualize.io/) for the terminal interface, panels, and keyboard/mouse interactions.
 * **Audio Processing:** [pydub](https://github.com/jiaaro/pydub) for handling various audio formats and chunking large files.
 * **Microphone Capture:** `sounddevice`, `soundfile`, and `pynput` for cross-platform push-to-talk recording (supports Windows via `msvcrt` fallback).
 
@@ -139,11 +140,17 @@ On the first run, the tool will automatically create a template for you.
 
 Since `aitranscribe` is symlinked to your global path, you can run it from any directory!
 
-**Record from microphone (Default Mode, Push-to-Talk):**
-Hold **SPACE** to record, release to stop. Press **ESC** to cancel.
+**Launch the TUI (default mode):**
+Press **SPACE** to start recording, **SPACE** again to finish, and **Q** to quit.
 ```bash
 aitranscribe
 ```
+
+Inside the TUI you can:
+- switch the pre-processing mode between raw transcription, cleanup, and English translation
+- inspect a four-line feedback log for STT and pre-processing progress
+- configure models and extra settings in dedicated panels
+- mark all unread transcriptions as read with the on-screen button
 
 **Transcribe a local file:**
 ```bash

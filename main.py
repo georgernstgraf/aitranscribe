@@ -12,7 +12,7 @@ import glob
 import sqlite3
 import datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 from rich.console import Console
 from rich.progress import Progress, TextColumn
 from dotenv import load_dotenv
@@ -22,6 +22,21 @@ from core import chunk_audio, transcribe_audio, process_with_llm, compress_audio
 
 console = Console(highlight=False, color_system=None)
 state = {"verbose": False}
+
+PRE_PROCESS_MODES = {
+    "raw": {
+        "label": "Raw transcription",
+        "prompt": None,
+    },
+    "cleanup": {
+        "label": "Clean up text",
+        "prompt": "Please correct grammatical errors, remove filler words, and structure the following text.",
+    },
+    "english": {
+        "label": "Translate to English",
+        "prompt": "Please translate the following text to English, correct grammatical errors, remove filler words, and structure it clearly.",
+    },
+}
 
 LLM_PROVIDERS = {
     "openrouter": {
@@ -183,10 +198,38 @@ def file_path_argument():
 # Logic Helper Functions
 def get_post_process_prompt(english: bool, post_process: bool) -> str | None:
     if english:
-        return "Please translate the following text to English, correct grammatical errors, remove filler words, and structure it clearly."
+        return PRE_PROCESS_MODES["english"]["prompt"]
     if post_process:
-        return "Please correct grammatical errors, remove filler words, and structure the following text."
+        return PRE_PROCESS_MODES["cleanup"]["prompt"]
     return None
+
+
+def get_pre_process_prompt(mode: str) -> str | None:
+    return PRE_PROCESS_MODES.get(mode, PRE_PROCESS_MODES["raw"])["prompt"]
+
+
+def get_next_recording_version(temp_dir: str) -> int:
+    base_name = "aitranscribe_record"
+    pattern = re.compile(rf"^{re.escape(base_name)}_v(\d+)(?:\.prompted)?\.[a-zA-Z0-9]+$")
+    max_v = 0
+    try:
+        for fname in os.listdir(temp_dir):
+            match = pattern.match(fname)
+            if match:
+                version = int(match.group(1))
+                if version > max_v:
+                    max_v = version
+    except OSError:
+        pass
+    return max_v + 1
+
+
+def get_recording_file_paths(extension: str = ".mp3") -> tuple[str, str]:
+    temp_dir = tempfile.gettempdir()
+    next_version = get_next_recording_version(temp_dir)
+    raw_wav_file = os.path.join(temp_dir, ".aitranscribe_raw.wav")
+    final_audio_file = os.path.join(temp_dir, f"aitranscribe_record_v{next_version:02d}{extension}")
+    return raw_wav_file, final_audio_file
 
 def cleanup_old_records() -> int:
     temp_dir = tempfile.gettempdir()
@@ -300,6 +343,45 @@ class PromptManager:
             console.print(f"Warning: Could not query prompts database: {e}")
             return []
 
+    def recent_prompts(self, limit: int = 5) -> list[dict[str, Any]]:
+        try:
+            with self._connect() as conn:
+                cursor = conn.execute(
+                    """
+                    SELECT id, prompt, filename, created_at, played_count
+                    FROM prompts
+                    WHERE played_count = 0
+                    ORDER BY id DESC
+                    LIMIT ?
+                    """,
+                    (limit,),
+                )
+                rows = cursor.fetchall()
+                return [
+                    {
+                        "id": row[0],
+                        "prompt": row[1],
+                        "filename": row[2],
+                        "timestamp": row[3],
+                        "played": row[4],
+                    }
+                    for row in rows
+                ]
+        except Exception as e:
+            console.print(f"Warning: Could not query recent prompts: {e}")
+            return []
+
+    def count_unplayed(self) -> int:
+        try:
+            with self._connect() as conn:
+                row = conn.execute(
+                    "SELECT COUNT(*) FROM prompts WHERE played_count = 0"
+                ).fetchone()
+                return int(row[0]) if row else 0
+        except Exception as e:
+            console.print(f"Warning: Could not count prompts: {e}")
+            return 0
+
     def add_prompt(self, prompt: str, filename: str) -> None:
         """Add a new prompt to the queue with played_count = 0."""
         created_at = datetime.datetime.now().isoformat()
@@ -376,12 +458,98 @@ class PromptManager:
             console.print(f"Warning: Could not remove prompt: {e}")
             return False
 
+    def mark_all_read(self) -> int:
+        """Mark all unplayed prompts as read and return affected row count."""
+        try:
+            with self._connect() as conn:
+                row = conn.execute(
+                    "SELECT COUNT(*) FROM prompts WHERE played_count = 0"
+                ).fetchone()
+                unread_count = int(row[0]) if row else 0
+                if unread_count:
+                    conn.execute(
+                        "UPDATE prompts SET played_count = 1 WHERE played_count = 0"
+                    )
+                return unread_count
+        except Exception as e:
+            console.print(f"Warning: Could not mark prompts as read: {e}")
+            return 0
+
 # Initialize PromptManager
 prompt_manager = PromptManager(PROMPTS_FILE)
 
+
+def process_recorded_audio_for_tui(
+    audio_np: np.ndarray,
+    settings: dict[str, Any],
+    feedback_callback: Callable[[str, str], None] | None = None,
+) -> dict[str, str]:
+    prompt = get_pre_process_prompt(str(settings.get("pre_process_mode", "raw")))
+    verbose = bool(settings.get("verbose", False))
+
+    if verbose:
+        state["verbose"] = True
+
+    if settings.get("cleanup_before_run"):
+        cleanup_old_records()
+
+    validate_api_keys(prompt)
+
+    raw_wav_file, final_mp3_file = get_recording_file_paths(".mp3")
+    samplerate = 44100
+    sf.write(raw_wav_file, audio_np, samplerate)
+
+    def update_feedback(step_id: str, status: str) -> None:
+        if feedback_callback:
+            feedback_callback(step_id, status)
+
+    try:
+        compress_audio(raw_wav_file, output_path=final_mp3_file)
+        if os.path.exists(raw_wav_file):
+            os.remove(raw_wav_file)
+
+        update_feedback("stt_send", "active")
+        assert stt_client is not None
+        transcript = transcribe_audio(stt_client, final_mp3_file, str(settings.get("stt_model", GROQ_STT_MODEL)))
+        update_feedback("stt_send", "done")
+        update_feedback("stt_response", "done")
+
+        final_text = transcript
+        if prompt:
+            update_feedback("pre_send", "active")
+            assert llm_client is not None
+            final_text = process_with_llm(llm_client, transcript, prompt, str(settings.get("llm_model", LLM_MODEL)))
+            update_feedback("pre_send", "done")
+            update_feedback("pre_response", "done")
+        else:
+            update_feedback("pre_send", "skipped")
+            update_feedback("pre_response", "skipped")
+
+        if settings.get("store_history", True):
+            prompt_manager.add_prompt(final_text, final_mp3_file)
+
+        return {"text": final_text, "file_path": final_mp3_file}
+    finally:
+        if os.path.exists(raw_wav_file):
+            os.remove(raw_wav_file)
+
+
+def launch_tui() -> None:
+    from tui import AitranscribeTUI
+
+    app = AitranscribeTUI(
+        prompt_manager=prompt_manager,
+        process_audio=process_recorded_audio_for_tui,
+        stt_provider_name="Groq",
+        llm_provider_name=LLM_PROVIDER,
+        default_stt_model=GROQ_STT_MODEL,
+        default_llm_model=LLM_MODEL,
+    )
+    app.run()
+
 # Typer App
 app = typer.Typer(
-    help="aitranscribe: CLI tool for STT and LLM post-processing via multiple providers.",
+    help="aitranscribe: TUI-first terminal app for STT and LLM post-processing via multiple providers.",
     context_settings={"help_option_names": ["-h", "--help"]},
     add_completion=False,
     rich_markup_mode=None,
@@ -404,7 +572,7 @@ def main(
     help: bool = help_option(),
 ):
     """
-    aitranscribe: CLI tool for STT and LLM post-processing.
+    aitranscribe: TUI-first terminal app for STT and LLM post-processing.
     """
     if help:
         typer.echo(ctx.get_help())
@@ -415,6 +583,25 @@ def main(
         return
 
     state["verbose"] = verbose
+
+    legacy_mode_requested = any(
+        [
+            file is not None,
+            list_prompts,
+            query_prompt,
+            remove_prompt is not None,
+            english,
+            post_process,
+            new,
+            verbose,
+            stt_model != GROQ_STT_MODEL,
+            llm_model != LLM_MODEL,
+        ]
+    )
+
+    if not legacy_mode_requested:
+        launch_tui()
+        raise typer.Exit(code=0)
 
     # Enforce mutual exclusivity between --english and --post-process
     if english and post_process:
@@ -464,27 +651,14 @@ def transcribe_file(file_path: str, stt_model: str, llm_model: str, post_process
         console.print(f"Error: File not found: {file_path}")
         raise typer.Exit(code=1)
 
-    # Determine the next version number for output files in temp_dir
     temp_dir = tempfile.gettempdir()
-    base_name = "aitranscribe_record"
-    pattern = re.compile(rf"^{re.escape(base_name)}_v(\d+)(?:\.prompted)?\.[a-zA-Z0-9]+$")
-    max_v = 0
-    try:
-        for fname in os.listdir(temp_dir):
-            match = pattern.match(fname)
-            if match:
-                v = int(match.group(1))
-                if v > max_v:
-                    max_v = v
-    except OSError:
-        pass
-    next_v = max_v + 1
+    next_v = get_next_recording_version(temp_dir)
 
     ext = os.path.splitext(file_path)[1]
     if not ext:
         ext = ".mp3"
 
-    temp_file_path = os.path.join(temp_dir, f"{base_name}_v{next_v:02d}{ext}")
+    temp_file_path = os.path.join(temp_dir, f"aitranscribe_record_v{next_v:02d}{ext}")
     try:
         shutil.copy2(file_path, temp_file_path)
         file_path = temp_file_path
@@ -548,7 +722,7 @@ def transcribe_file(file_path: str, stt_model: str, llm_model: str, post_process
         raise typer.Exit(code=1)
 
 def record_from_microphone(stt_model: str, llm_model: str, post_process: bool, verbose: bool, english: bool, new: bool):
-    """Record audio from microphone (Push-to-Talk) and transcribe it using Groq."""
+    """Record audio from microphone in toggle mode and transcribe it using Groq."""
     if verbose:
         state["verbose"] = True
 
@@ -563,20 +737,14 @@ def record_from_microphone(stt_model: str, llm_model: str, post_process: bool, v
     channels = 1
     audio_data = []
 
-    is_wayland = os.getenv("XDG_SESSION_TYPE", "").lower() == "wayland"
-    recording_mode = "Toggle" if is_wayland else "Push-to-Talk"
-
-    console.print(f"{recording_mode} Recording")
+    console.print("Toggle Recording")
     console.print(f"STT Provider: Groq")
     console.print(f"STT Model: {stt_model}")
     if prompt:
         console.print(f"LLM Provider: {LLM_PROVIDER}")
         console.print(f"LLM Model: {llm_model}")
-    
-    if is_wayland:
-        console.print("Press SPACE to start recording. Press SPACE again to stop. Press ESC to cancel.")
-    else:
-        console.print("Hold SPACE to record. Release to stop. Press ESC to cancel.")
+
+    console.print("Press SPACE to start recording. Press SPACE again to stop. Press ESC to cancel.")
 
     recording_state = {
         "is_recording": False,
@@ -586,14 +754,10 @@ def record_from_microphone(stt_model: str, llm_model: str, post_process: bool, v
 
     def on_press(key: keyboard.Key | keyboard.KeyCode | None) -> Any:
         if key == keyboard.Key.space:
-            if is_wayland:
-                recording_state["is_recording"] = not recording_state["is_recording"]
-                if not recording_state["is_recording"]:
-                    recording_state["stop_event"] = True
-                    return False
-            else:
-                if not recording_state["is_recording"]:
-                    recording_state["is_recording"] = True
+            recording_state["is_recording"] = not recording_state["is_recording"]
+            if not recording_state["is_recording"]:
+                recording_state["stop_event"] = True
+                return False
         elif key == keyboard.Key.esc:
             recording_state["stop_event"] = True
             recording_state["cancelled"] = True
@@ -601,23 +765,17 @@ def record_from_microphone(stt_model: str, llm_model: str, post_process: bool, v
         return None
 
     def on_release(key: keyboard.Key | keyboard.KeyCode | None) -> Any:
-        if not is_wayland and key == keyboard.Key.space:
-            if recording_state["is_recording"]:
-                recording_state["is_recording"] = False
-                recording_state["stop_event"] = True
-                return False
         return None
 
     listener = None
-    if not is_wayland:
-        try:
-            listener = keyboard.Listener(on_press=on_press, on_release=on_release, suppress=True)
-            listener.start()
-        except Exception as e:
-            if verbose:
-                console.print(f"Warning: Could not start pynput listener: {e}")
-            console.print("Falling back to toggle-mode recording (press SPACE to start/stop).")
-            listener = None
+    try:
+        listener = keyboard.Listener(on_press=on_press, on_release=on_release, suppress=True)
+        listener.start()
+    except Exception as e:
+        if verbose:
+            console.print(f"Warning: Could not start pynput listener: {e}")
+        console.print("Falling back to terminal toggle-mode recording.")
+        listener = None
 
     fd = None
     old_settings = None
@@ -750,26 +908,7 @@ def record_from_microphone(stt_model: str, llm_model: str, post_process: bool, v
     # Convert to numpy array
     audio_np = np.concatenate(audio_data, axis=0)
 
-    # Save to temp file
-    temp_dir = tempfile.gettempdir()
-
-    # Determine the next version number for output files
-    base_name = "aitranscribe_record"
-    pattern = re.compile(rf"^{re.escape(base_name)}_v(\d+)(?:\.prompted)?\.[a-zA-Z0-9]+$")
-    max_v = 0
-    try:
-        for fname in os.listdir(temp_dir):
-            match = pattern.match(fname)
-            if match:
-                v = int(match.group(1))
-                if v > max_v:
-                    max_v = v
-    except OSError:
-        pass
-    next_v = max_v + 1
-
-    raw_wav_file = os.path.join(temp_dir, ".aitranscribe_raw.wav")
-    final_mp3_file = os.path.join(temp_dir, f"{base_name}_v{next_v:02d}.mp3")
+    raw_wav_file, final_mp3_file = get_recording_file_paths(".mp3")
 
     sf.write(raw_wav_file, audio_np, samplerate)
 
