@@ -340,6 +340,36 @@ def test_promptmanager_recent_prompts_returns_all_in_created_at_desc_order():
     finally:
         temp_file.unlink()
 
+
+def test_promptmanager_update_prompt_by_id():
+    with tempfile.NamedTemporaryFile(mode='w', suffix='.sqlite', delete=False) as f:
+        temp_file = Path(f.name)
+
+    try:
+        manager = PromptManager(temp_file)
+        prompt_id = manager.add_prompt("Original", "file1.mp3")
+
+        assert prompt_id is not None
+        assert manager.update_prompt(prompt_id, "Edited") is True
+        assert manager.recent_prompts()[0]["prompt"] == "Edited"
+    finally:
+        temp_file.unlink()
+
+
+def test_promptmanager_remove_prompt_by_id():
+    with tempfile.NamedTemporaryFile(mode='w', suffix='.sqlite', delete=False) as f:
+        temp_file = Path(f.name)
+
+    try:
+        manager = PromptManager(temp_file)
+        prompt_id = manager.add_prompt("To delete", "file1.mp3")
+
+        assert prompt_id is not None
+        assert manager.remove_prompt_by_id(prompt_id) is True
+        assert manager.count_prompts() == 0
+    finally:
+        temp_file.unlink()
+
 # ==================== Integration Tests ====================
 
 def test_cli_query_prompt_with_content():

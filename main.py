@@ -436,20 +436,46 @@ class PromptManager:
             console.print(f"Warning: Could not count prompts: {e}")
             return 0
 
-    def add_prompt(self, prompt: str, filename: str) -> None:
+    def add_prompt(self, prompt: str, filename: str) -> int | None:
         """Add a new prompt to the queue."""
         created_at = datetime.datetime.now().isoformat()
         try:
             with self._connect() as conn:
-                conn.execute(
+                cursor = conn.execute(
                     """
                     INSERT INTO prompts (prompt, filename, created_at)
                     VALUES (?, ?, ?)
                     """,
-                    (wrap_text(prompt), filename, created_at),
+                    (prompt, filename, created_at),
                 )
+                lastrowid = cursor.lastrowid
+                return int(lastrowid) if lastrowid is not None else None
         except Exception as e:
             console.print(f"Warning: Could not store prompt: {e}")
+            return None
+
+    def update_prompt(self, prompt_id: int, prompt: str) -> bool:
+        """Update a stored prompt by database id."""
+        try:
+            with self._connect() as conn:
+                cursor = conn.execute(
+                    "UPDATE prompts SET prompt = ? WHERE id = ?",
+                    (prompt, prompt_id),
+                )
+                return cursor.rowcount > 0
+        except Exception as e:
+            console.print(f"Warning: Could not update prompt: {e}")
+            return False
+
+    def remove_prompt_by_id(self, prompt_id: int) -> bool:
+        """Remove a stored prompt by database id."""
+        try:
+            with self._connect() as conn:
+                cursor = conn.execute("DELETE FROM prompts WHERE id = ?", (prompt_id,))
+                return cursor.rowcount > 0
+        except Exception as e:
+            console.print(f"Warning: Could not remove prompt: {e}")
+            return False
 
     def list_prompts(self) -> None:
         """List all stored prompts in queue order."""
@@ -500,10 +526,12 @@ class PromptManager:
 
         removed_prompt = stored_prompts[index - 1]
         try:
-            with self._connect() as conn:
-                conn.execute("DELETE FROM prompts WHERE id = ?", (removed_prompt["id"],))
-            console.print(f"Removed prompt {index}: {removed_prompt['prompt'][:50]}...")
-            return True
+            removed = self.remove_prompt_by_id(int(removed_prompt["id"]))
+            if removed:
+                console.print(f"Removed prompt {index}: {removed_prompt['prompt'][:50]}...")
+                return True
+            console.print(f"Warning: Could not remove prompt {index}.")
+            return False
         except Exception as e:
             console.print(f"Warning: Could not remove prompt: {e}")
             return False

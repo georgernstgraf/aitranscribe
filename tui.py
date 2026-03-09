@@ -12,9 +12,9 @@ import numpy as np
 import sounddevice as sd
 from textual.app import App, ComposeResult
 from textual.binding import Binding
-from textual.containers import Horizontal, Vertical, VerticalScroll
+from textual.containers import Horizontal, Vertical
 from textual.events import Resize
-from textual.widgets import Checkbox, Footer, Header, Input, Label, OptionList, RadioButton, RadioSet, Static
+from textual.widgets import Footer, Header, Input, Label, OptionList, RadioButton, RadioSet, Static, TextArea
 from textual.widgets.option_list import Option
 
 
@@ -169,6 +169,13 @@ class AitranscribeTUI(App[None]):
         min-height: 10;
     }
 
+    #transcript_editor {
+        height: 1fr;
+        border: none;
+        background: transparent;
+        padding: 0;
+    }
+
     #feedback_panel {
         height: 6;
         margin-top: 1;
@@ -205,12 +212,12 @@ class AitranscribeTUI(App[None]):
     }
 
     .field_row {
-        height: auto;
+        height: 3;
         margin-bottom: 0;
     }
 
     .field_row Label {
-        width: 9;
+        width: 11;
         color: #a8dadc;
         content-align: left middle;
     }
@@ -218,21 +225,14 @@ class AitranscribeTUI(App[None]):
     .field_row Input {
         width: 1fr;
     }
-
-    .setting_box {
-        height: auto;
-        margin-top: 0;
-    }
-
-    .setting_box Checkbox {
-        width: 100%;
-        margin-bottom: 0;
-    }
     """
 
     BINDINGS = [
         Binding("space", "toggle_recording", "Record / Stop", priority=True),
+        Binding("ctrl+s", "save_transcript", "Save Transcript"),
+        Binding("ctrl+shift+c", "copy_transcript", "Copy Transcript", priority=True),
         Binding("c", "copy_transcript", "Copy Transcript"),
+        Binding("delete", "delete_selected_transcription", "Delete Selected"),
         Binding("escape", "focus_recorder", "Recorder Focus"),
         Binding("q", "quit", "Quit"),
     ]
@@ -250,7 +250,7 @@ class AitranscribeTUI(App[None]):
         "file_path",
         "stt_model",
         "llm_model",
-        "verbose_errors",
+        "transcript_editor",
         "history_list",
     }
 
@@ -282,10 +282,13 @@ class AitranscribeTUI(App[None]):
         self.is_processing = False
         self.input_source = str(self.initial_settings.get("input_source", "microphone"))
         self.pre_process_mode = str(self.initial_settings.get("pre_process_mode", "english"))
+        self.verbose = bool(self.initial_settings.get("verbose", False))
         self.latest_transcript = "No transcript yet."
         self.history_prompts: list[dict[str, Any]] = []
         self.selected_history_id: int | None = None
         self.selected_history_text: str | None = None
+        self.selected_history_filename: str | None = None
+        self.latest_file_path: str | None = None
         self.status_text = "Press Space to Start Recording" if self.input_source == "microphone" else "Press Enter on File to Transcribe"
         self.feedback_state = {step_id: "pending" for step_id, _ in self.FEEDBACK_STEPS}
 
@@ -294,8 +297,8 @@ class AitranscribeTUI(App[None]):
         with Horizontal(id="body"):
             with Vertical(id="primary"):
                 yield Static(id="status_panel", classes="panel")
-                with VerticalScroll(id="transcript_panel", classes="panel"):
-                    yield Static(id="transcript_text")
+                with Vertical(id="transcript_panel", classes="panel"):
+                    yield TextArea("No transcript yet.", id="transcript_editor")
                 yield Static(id="feedback_panel", classes="panel")
             with Vertical(id="sidebar"):
                 with Vertical(id="history_panel", classes="panel"):
@@ -314,18 +317,16 @@ class AitranscribeTUI(App[None]):
                         yield RadioButton("Translate to English", id="mode-english", value=self.pre_process_mode == "english")
                 with Vertical(id="extra_panel", classes="panel"):
                     with Horizontal(classes="field_row"):
-                        yield Label("STT Model")
+                        yield Label("STT-Model")
                         yield Input(value=self.default_stt_model, placeholder=f"{self.stt_provider_name} model", id="stt_model")
                     with Horizontal(classes="field_row"):
-                        yield Label("LLM Model")
+                        yield Label("LLM-Model")
                         yield Input(value=self.default_llm_model, placeholder=f"{self.llm_provider_name} model", id="llm_model")
-                    with Vertical(classes="setting_box"):
-                        yield Checkbox("Verbose error output", value=bool(self.initial_settings.get("verbose", False)), id="verbose_errors")
         yield Footer()
 
     def on_mount(self) -> None:
         self.query_one("#status_panel", Static).border_title = "Status"
-        self.query_one("#transcript_panel", VerticalScroll).border_title = "Transcript (C to copy)"
+        self.query_one("#transcript_panel", Vertical).border_title = "Transcript (editable, Ctrl+S to save)"
         self.query_one("#feedback_panel", Static).border_title = "Feedback Log"
         self.query_one("#history_panel", Vertical).border_title = "Transcriptions"
         self.query_one("#config_panel", Vertical).border_title = "Recording Mode"
@@ -338,7 +339,7 @@ class AitranscribeTUI(App[None]):
 
     def refresh_status(self) -> None:
         action = "Space=record" if self.input_source == "microphone" else "Enter on File=transcribe"
-        hint = f"{action} | C=copy | Tab=navigate | Esc=record focus | Q=quit"
+        hint = f"{action} | Ctrl+S=save | Ctrl+Shift+C=copy | Del=list delete | Tab=navigate | Esc=record focus | Q=quit"
         self.query_one("#status_panel", Static).update(f"{self.status_text}\n{hint}")
 
     def _focus_initial_widget(self) -> None:
@@ -352,23 +353,24 @@ class AitranscribeTUI(App[None]):
             history_list.highlighted = 0
             self.select_history_prompt(0)
 
-    def _wrapped_text(self, text: str, width: int, preserve_lines: bool = False) -> str:
-        effective_width = max(24, width)
-        if preserve_lines:
-            return "\n".join(
-                textwrap.fill(line, width=effective_width) if line else ""
-                for line in text.splitlines()
-            )
-        return textwrap.fill(text, width=effective_width)
-
     def get_displayed_transcript(self) -> str:
         if self.selected_history_text and not self.is_recording and not self.is_processing:
             return self.selected_history_text
         return self.latest_transcript
 
+    def get_transcript_editor(self) -> TextArea:
+        return self.query_one("#transcript_editor", TextArea)
+
+    def get_editor_text(self) -> str:
+        return self.get_transcript_editor().text
+
+    def set_editor_text(self, text: str) -> None:
+        self.get_transcript_editor().text = text
+
     def clear_history_selection(self) -> None:
         self.selected_history_id = None
         self.selected_history_text = None
+        self.selected_history_filename = None
 
     def select_history_prompt(self, index: int) -> None:
         if index < 0 or index >= len(self.history_prompts):
@@ -376,14 +378,13 @@ class AitranscribeTUI(App[None]):
         prompt = self.history_prompts[index]
         self.selected_history_id = int(prompt["id"])
         self.selected_history_text = str(prompt["prompt"])
+        filename = prompt.get("filename")
+        self.selected_history_filename = str(filename) if filename is not None else None
         if self._screen_stack:
             self.refresh_transcript()
 
     def refresh_transcript(self) -> None:
-        panel_width = self.query_one("#transcript_panel", VerticalScroll).size.width
-        transcript = self.get_displayed_transcript()
-        text = self._wrapped_text(transcript, panel_width - 4, preserve_lines=True) if transcript else ""
-        self.query_one("#transcript_text", Static).update(text)
+        self.set_editor_text(self.get_displayed_transcript())
 
     def refresh_feedback(self) -> None:
         lines = []
@@ -433,7 +434,6 @@ class AitranscribeTUI(App[None]):
     def on_resize(self, event: Resize) -> None:
         del event
         self.refresh_status()
-        self.refresh_transcript()
         self.refresh_feedback()
         self.refresh_history()
 
@@ -476,6 +476,7 @@ class AitranscribeTUI(App[None]):
 
         self.is_recording = True
         self.clear_history_selection()
+        self.latest_file_path = None
         self.latest_transcript = "Recording in progress..."
         self.status_text = "Press Space again to Finish"
         self.reset_feedback()
@@ -487,6 +488,7 @@ class AitranscribeTUI(App[None]):
         self.is_recording = False
         if audio is None or len(audio) == 0:
             self.latest_transcript = "No audio recorded."
+            self.latest_file_path = None
             self.status_text = "Press Space to Start Recording"
             self.refresh_transcript()
             self.refresh_status()
@@ -510,6 +512,7 @@ class AitranscribeTUI(App[None]):
         self.is_processing = True
         self.clear_history_selection()
         self.latest_transcript = f"Transcribing file: {file_path}"
+        self.latest_file_path = file_path
         self.status_text = "Processing file..."
         self.reset_feedback()
         self.refresh_status()
@@ -524,7 +527,7 @@ class AitranscribeTUI(App[None]):
             "pre_process_mode": self.pre_process_mode,
             "stt_model": self.query_one("#stt_model", Input).value.strip() or self.default_stt_model,
             "llm_model": self.query_one("#llm_model", Input).value.strip() or self.default_llm_model,
-            "verbose": self.query_one("#verbose_errors", Checkbox).value,
+            "verbose": self.verbose,
         }
 
     def persist_setting_value(self, setting_name: str, value: Any) -> None:
@@ -566,6 +569,7 @@ class AitranscribeTUI(App[None]):
             if current == "active":
                 self.feedback_state[step_id] = "error"
         self.latest_transcript = error_message
+        self.latest_file_path = None
         retry_hint = "Press Space to try again." if self.input_source == "microphone" else "Press Enter on File to try again."
         self.status_text = f"Processing failed. {retry_hint}"
         self.refresh_feedback()
@@ -576,13 +580,66 @@ class AitranscribeTUI(App[None]):
         self.is_processing = False
         self.clear_history_selection()
         self.latest_transcript = result.get("text", "") or "No transcript returned."
+        self.latest_file_path = result.get("file_path")
         self.status_text = "Press Space to Start Recording" if self.input_source == "microphone" else "File transcription finished. Press Enter on File to run again."
         self.refresh_transcript()
         self.refresh_status()
         self.refresh_history()
 
+    def action_save_transcript(self) -> None:
+        text = self.get_editor_text().strip()
+        if not text or text in {"No transcript yet.", "Recording in progress...", "Waiting for transcription..."}:
+            self.status_text = "No finished transcript to save yet."
+            self.refresh_status()
+            return
+
+        if self.selected_history_id is not None:
+            saved = self.prompt_manager.update_prompt(self.selected_history_id, text)
+            if saved:
+                self.selected_history_text = text
+                self.latest_transcript = text
+                self.status_text = f"Saved transcription #{self.selected_history_id}."
+                self.refresh_history()
+            else:
+                self.status_text = f"Could not save transcription #{self.selected_history_id}."
+            self.refresh_status()
+            return
+
+        filename = self.latest_file_path or self.query_one("#file_path", Input).value.strip() or "manual-entry"
+        prompt_id = self.prompt_manager.add_prompt(text, filename)
+        if prompt_id is None:
+            self.status_text = "Could not save transcription."
+        else:
+            self.selected_history_id = prompt_id
+            self.selected_history_text = text
+            self.selected_history_filename = filename
+            self.latest_transcript = text
+            self.status_text = f"Saved transcription #{prompt_id}."
+            self.refresh_history()
+        self.refresh_status()
+
+    def action_delete_selected_transcription(self) -> None:
+        focused = self.focused
+        if focused is None or focused.id != "history_list":
+            return
+        if self.selected_history_id is None:
+            self.status_text = "No transcription selected to delete."
+            self.refresh_status()
+            return
+
+        deleted_id = self.selected_history_id
+        deleted = self.prompt_manager.remove_prompt_by_id(deleted_id)
+        if deleted:
+            self.latest_transcript = "No transcript yet."
+            self.clear_history_selection()
+            self.status_text = f"Deleted transcription #{deleted_id}."
+            self.refresh_history()
+        else:
+            self.status_text = f"Could not delete transcription #{deleted_id}."
+        self.refresh_status()
+
     def action_copy_transcript(self) -> None:
-        text = self.get_displayed_transcript().strip()
+        text = self.get_editor_text().strip()
         if not text or text in {"No transcript yet.", "Recording in progress...", "Waiting for transcription..."}:
             self.status_text = "No finished transcript to copy yet."
         elif copy_text_to_clipboard(text):
@@ -610,10 +667,6 @@ class AitranscribeTUI(App[None]):
         elif event.radio_set.id == "preprocess_modes" and event.pressed.id:
             self.pre_process_mode = event.pressed.id.removeprefix("mode-")
             self.persist_setting_value("pre_process_mode", self.pre_process_mode)
-
-    def on_checkbox_changed(self, event: Checkbox.Changed) -> None:
-        if event.checkbox.id == "verbose_errors":
-            self.persist_setting_value("verbose", event.value)
 
     def on_input_changed(self, event: Input.Changed) -> None:
         if event.input.id == "file_path":
