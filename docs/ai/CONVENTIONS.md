@@ -15,7 +15,10 @@ Follow these without question. Do not deviate unless explicitly told.
 ## UI Patterns
 - Wrap transcript and preview text to the actual panel width; do not reintroduce fixed-width wrapping like the removed 68-character limit.
 - Use `Checkbox` for compact boolean settings in the sidebar instead of `Switch`, which rendered and behaved poorly in this layout.
-- Drive unread-history navigation with `OptionList`; the highlighted unread entry is the source of truth for transcript preview while the app is idle.
+- Drive stored-transcription navigation with `OptionList`; the highlighted entry is the source of truth for transcript preview while the app is idle.
+- Keep the transcription list focused on mount so arrow keys work immediately when the app opens.
+- Keep source selection and file-path entry inside the `Recording Mode` panel; microphone and filesystem transcription are two inputs to the same workflow.
+- Persist user-adjustable TUI choices directly to `CONFIG_FILE` instead of keeping them session-local.
 
 ## Testing
 - Cover TUI integration points from the CLI layer with focused unit tests instead of trying to run an interactive terminal session in `pytest`.

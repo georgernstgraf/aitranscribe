@@ -1,7 +1,11 @@
 import os
+import sys
 from io import StringIO
+from pathlib import Path
 from unittest.mock import Mock
 from unittest.mock import patch
+
+sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from tui import AitranscribeTUI, build_osc52_sequence, copy_text_to_clipboard, copy_text_with_osc52, get_clipboard_command
 
@@ -62,10 +66,12 @@ def test_history_selection_controls_displayed_transcript():
     app = AitranscribeTUI(
         prompt_manager=Mock(),
         process_audio=Mock(),
+        process_file=Mock(),
         stt_provider_name="Groq",
         llm_provider_name="openrouter",
         default_stt_model="whisper",
         default_llm_model="gpt",
+        initial_settings={"pre_process_mode": "english", "input_source": "microphone"},
     )
     app.latest_transcript = "Newest transcript"
     app.history_prompts = [{"id": 7, "prompt": "Stored unread transcript"}]
@@ -80,13 +86,30 @@ def test_displayed_transcript_returns_latest_while_processing():
     app = AitranscribeTUI(
         prompt_manager=Mock(),
         process_audio=Mock(),
+        process_file=Mock(),
         stt_provider_name="Groq",
         llm_provider_name="openrouter",
         default_stt_model="whisper",
         default_llm_model="gpt",
+        initial_settings={"pre_process_mode": "english", "input_source": "microphone"},
     )
     app.latest_transcript = "Waiting for transcription..."
     app.selected_history_text = "Stored unread transcript"
     app.is_processing = True
 
     assert app.get_displayed_transcript() == "Waiting for transcription..."
+
+
+def test_tui_uses_english_as_default_preprocess_mode():
+    app = AitranscribeTUI(
+        prompt_manager=Mock(),
+        process_audio=Mock(),
+        process_file=Mock(),
+        stt_provider_name="Groq",
+        llm_provider_name="openrouter",
+        default_stt_model="whisper",
+        default_llm_model="gpt",
+        initial_settings={"pre_process_mode": "english", "input_source": "microphone"},
+    )
+
+    assert app.pre_process_mode == "english"

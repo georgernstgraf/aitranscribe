@@ -2,11 +2,11 @@
 
 - Current branch: `main`
 - Open work:
-  1. [ ] See #42 - Finish the TUI-first transcription workflow rollout and manual validation.
+  - None.
 - Context:
-  - Default no-arg startup now launches the `Textual` TUI from `main.py:603` via `launch_tui()` in `main.py:537`.
-  - The new UI lives in `tui.py:120` and now covers microphone recording, transcript display, the four-line feedback log, preprocessing mode selection, compact checkbox-based settings, unread-history navigation, mark-all-read, and explicit transcript copy via `C`.
-  - Queue helpers for unread counts, recent unread items, and mark-all-read were added to `PromptManager` in `main.py:346`, `main.py:374`, and `main.py:461`.
+  - Default no-arg startup still launches the `Textual` TUI, but the sidebar now centers on stored transcriptions instead of unread/read queue state.
+  - The TUI in `tui.py` now uses a roughly `4fr / 3fr` layout, focuses the transcription list on mount for immediate arrow-key previewing, and exposes source selection in the `Recording Mode` card for microphone vs filesystem file transcription.
+  - `PromptManager` in `main.py` no longer uses `played_count`; stored prompts are plain history entries, `--query` deletes the oldest prompt, and old databases are migrated in place.
+  - TUI user choices now persist directly to `CONFIG_FILE`: preprocessing mode defaults to `english`, source mode and last file path are remembered, model edits persist, and queue storage is always on.
   - Clipboard support now uses system tools from `tui.py:25` and `tui.py:70`, with OSC52 fallback when external helpers are unavailable.
-  - Unread previews are now driven by `OptionList` selection in `tui.py:306`, `tui.py:352`, `tui.py:390`, and `tui.py:558`, so arrow-key movement updates the full transcript panel.
-  - Remaining work is primarily manual UX validation, deciding how aggressively to retire legacy CLI switches once the TUI path is stable, and further polishing the TUI layout and interaction model.
+  - File transcription inside the TUI is handled by a dedicated `process_file_for_tui()` path in `main.py`, and temp recording copies now use 3-digit version suffixes like `v001`.

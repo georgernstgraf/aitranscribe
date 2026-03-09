@@ -26,3 +26,15 @@ Each entry documents WHAT was decided and WHY.
 - **Reason**: Real-world testing showed visible mouse selection inside the fullscreen TUI did not produce pasteable system clipboard content even in `kitty`, so copyability needed an app-level path.
 - **Considered**: Switching terminals, relying on terminal settings, or abandoning the TUI immediately.
 - **Tradeoff**: Mouse selection still is not the primary copy workflow; users need an explicit copy action.
+
+## 2026-03-09: Replace Read Tracking With Stored Transcription History
+- **Choice**: Remove `played_count`, unread counts, and mark-all-read behavior; keep all saved transcriptions as plain stored history entries.
+- **Reason**: The TUI workflow now centers on browsing and previewing saved transcriptions rather than maintaining a separate unread/read state machine.
+- **Considered**: Preserving unread semantics while only renaming the panel.
+- **Tradeoff**: The app no longer distinguishes fresh items from older history entries.
+
+## 2026-03-09: Persist TUI Choices And Support Filesystem Transcription In-Place
+- **Choice**: Make `english` the default TUI preprocessing mode, persist TUI choices directly into `CONFIG_FILE`, and let the `Recording Mode` panel switch between microphone and filesystem-file transcription.
+- **Reason**: The TUI is now the primary workflow, so it should reopen with the user's last choices and let users transcribe existing audio files without dropping to legacy CLI flags.
+- **Considered**: Keeping source selection outside the TUI or treating file transcription as CLI-only.
+- **Tradeoff**: The config file is updated more frequently during interactive use.

@@ -19,7 +19,6 @@ try:
         stt_model_option,
         llm_model_option,
         verbose_option,
-        new_option,
         english_option,
         help_option,
         file_option,
@@ -28,10 +27,11 @@ try:
         query_prompt_option,
         remove_prompt_option,
         get_post_process_prompt,
-        cleanup_old_records,
         validate_api_keys,
         wrap_text,
         get_pre_process_prompt,
+        get_recording_file_paths,
+        get_tui_settings,
         launch_tui,
         console,
         CONFIG_FILE,
@@ -95,11 +95,6 @@ def test_llm_model_option():
 def test_verbose_option():
     """Test that verbose_option returns correct typer.Option."""
     option = verbose_option()
-    assert isinstance(option, typer.models.OptionInfo)
-
-def test_new_option():
-    """Test that new_option returns correct typer.Option."""
-    option = new_option()
     assert isinstance(option, typer.models.OptionInfo)
 
 def test_english_option():
@@ -166,38 +161,36 @@ def test_get_pre_process_prompt_modes():
     assert "correct grammatical errors" in cleanup_prompt
     assert "translate the following text to English" in english_prompt
 
-def test_cleanup_old_records():
-    """Test that cleanup_old_records deletes matching files."""
+def test_get_recording_file_paths_uses_three_digits():
+    """Test temp recording filenames use 3-digit versions."""
     temp_dir = tempfile.mkdtemp()
-    
-    # Create test files
-    test_files = [
-        os.path.join(temp_dir, "aitranscribe_record_v01.txt"),
-        os.path.join(temp_dir, "aitranscribe_record_v02.txt"),
-        os.path.join(temp_dir, "other_file.txt"),
-    ]
-    
-    for f in test_files:
-        with open(f, 'w') as fp:
-            fp.write("test")
-    
+
     try:
-        # Patch tempfile.gettempdir to return our test directory
-        with patch('tempfile.gettempdir', return_value=temp_dir):
-            # Run cleanup
-            deleted_count = cleanup_old_records()
-            
-            # Check that only aitranscribe_record files were deleted
-            assert deleted_count == 2
-            assert not os.path.exists(test_files[0])
-            assert not os.path.exists(test_files[1])
-            assert os.path.exists(test_files[2])  # Other files should remain
+        Path(os.path.join(temp_dir, "aitranscribe_record_v001.mp3")).touch()
+        Path(os.path.join(temp_dir, "aitranscribe_record_v009.mp3")).touch()
+
+        with patch("tempfile.gettempdir", return_value=temp_dir):
+            raw_wav, final_audio = get_recording_file_paths(".mp3")
+
+        assert raw_wav == os.path.join(temp_dir, ".aitranscribe_raw.wav")
+        assert final_audio == os.path.join(temp_dir, "aitranscribe_record_v010.mp3")
     finally:
-        # Cleanup remaining test files
-        for f in test_files:
-            if os.path.exists(f):
-                os.remove(f)
+        for file_name in os.listdir(temp_dir):
+            os.remove(os.path.join(temp_dir, file_name))
         os.rmdir(temp_dir)
+
+
+def test_get_tui_settings_defaults_to_english_and_microphone(tmp_path):
+    """Test TUI settings load new defaults from config."""
+    config_file = tmp_path / "config"
+    config_file.write_text('PRE_PROCESS_MODE="english"\nTRANSCRIBE_SOURCE="microphone"\nVERBOSE_ERRORS="false"\n')
+
+    with patch("main.CONFIG_FILE", config_file), patch("main.GROQ_STT_MODEL", "whisper"), patch("main.LLM_MODEL", "gpt"):
+        settings = get_tui_settings()
+
+    assert settings["pre_process_mode"] == "english"
+    assert settings["input_source"] == "microphone"
+    assert settings["file_path"] == ""
 
 def test_validate_api_keys_with_stt_client_none():
     """Test that validate_api_keys fails when stt_client is None."""
@@ -277,8 +270,8 @@ def test_promptmanager_query_prompt_success():
     finally:
         temp_file.unlink()
 
-def test_promptmanager_query_prompt_increments_played_counter():
-    """Test PromptManager.query_prompt increments played counter instead of deleting."""
+def test_promptmanager_query_prompt_deletes_oldest_prompt():
+    """Test PromptManager.query_prompt deletes the returned prompt."""
     with tempfile.NamedTemporaryFile(mode='w', suffix='.sqlite', delete=False) as f:
         temp_file = Path(f.name)
 
@@ -291,11 +284,8 @@ def test_promptmanager_query_prompt_increments_played_counter():
         assert len(manager.prompts) == 0
 
         with sqlite3.connect(temp_file) as conn:
-            row = conn.execute(
-                "SELECT prompt, played_count FROM prompts ORDER BY id ASC LIMIT 1"
-            ).fetchone()
-            assert row[0] == "Play me"
-            assert row[1] == 1
+            rows = conn.execute("SELECT prompt FROM prompts ORDER BY id ASC").fetchall()
+            assert rows == []
     finally:
         temp_file.unlink()
 
@@ -443,26 +433,5 @@ def test_promptmanager_remove_prompt_success():
         assert len(manager.prompts) == 2
         assert manager.prompts[0]['prompt'] == "First prompt"
         assert manager.prompts[1]['prompt'] == "Third prompt"
-    finally:
-        temp_file.unlink()
-
-
-def test_promptmanager_mark_all_read():
-    """Test PromptManager.mark_all_read marks every unread prompt."""
-    with tempfile.NamedTemporaryFile(mode='w', suffix='.sqlite', delete=False) as f:
-        temp_file = Path(f.name)
-
-    try:
-        manager = PromptManager(temp_file)
-        manager.add_prompt("First prompt", "file1.mp3")
-        manager.add_prompt("Second prompt", "file2.mp3")
-
-        marked = manager.mark_all_read()
-
-        assert marked == 2
-        assert manager.count_unplayed() == 0
-        with sqlite3.connect(temp_file) as conn:
-            rows = conn.execute("SELECT played_count FROM prompts ORDER BY id ASC").fetchall()
-            assert rows == [(1,), (1,)]
     finally:
         temp_file.unlink()
