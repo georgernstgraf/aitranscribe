@@ -318,6 +318,28 @@ def test_promptmanager_list_prompts_populated(capsys):
     finally:
         temp_file.unlink()
 
+
+def test_promptmanager_recent_prompts_returns_all_in_created_at_desc_order():
+    with tempfile.NamedTemporaryFile(mode='w', suffix='.sqlite', delete=False) as f:
+        temp_file = Path(f.name)
+
+    try:
+        manager = PromptManager(temp_file)
+        manager.add_prompt("First prompt", "file1.mp3")
+        manager.add_prompt("Second prompt", "file2.mp3")
+        manager.add_prompt("Third prompt", "file3.mp3")
+
+        with sqlite3.connect(temp_file) as conn:
+            conn.execute("UPDATE prompts SET created_at = ? WHERE prompt = ?", ("2026-03-09T10:00:00", "First prompt"))
+            conn.execute("UPDATE prompts SET created_at = ? WHERE prompt = ?", ("2026-03-09T11:00:00", "Second prompt"))
+            conn.execute("UPDATE prompts SET created_at = ? WHERE prompt = ?", ("2026-03-09T12:00:00", "Third prompt"))
+
+        prompts = manager.recent_prompts()
+
+        assert [prompt["prompt"] for prompt in prompts] == ["Third prompt", "Second prompt", "First prompt"]
+    finally:
+        temp_file.unlink()
+
 # ==================== Integration Tests ====================
 
 def test_cli_query_prompt_with_content():

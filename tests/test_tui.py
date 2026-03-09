@@ -5,9 +5,12 @@ from pathlib import Path
 from unittest.mock import Mock
 from unittest.mock import patch
 
+import pytest
+
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from tui import AitranscribeTUI, build_osc52_sequence, copy_text_to_clipboard, copy_text_with_osc52, get_clipboard_command
+from textual.widgets import Input
 
 
 def test_get_clipboard_command_prefers_wl_copy_on_wayland():
@@ -113,3 +116,53 @@ def test_tui_uses_english_as_default_preprocess_mode():
     )
 
     assert app.pre_process_mode == "english"
+
+
+@pytest.mark.anyio
+async def test_refresh_history_requests_full_history_list():
+    prompt_manager = Mock()
+    prompt_manager.count_prompts.return_value = 2
+    prompt_manager.recent_prompts.return_value = [
+        {"id": 2, "prompt": "Newest", "filename": "b.mp3", "timestamp": "2026-03-09T12:00:00"},
+        {"id": 1, "prompt": "Older", "filename": "a.mp3", "timestamp": "2026-03-09T11:00:00"},
+    ]
+
+    app = AitranscribeTUI(
+        prompt_manager=prompt_manager,
+        process_audio=Mock(),
+        process_file=Mock(),
+        stt_provider_name="Groq",
+        llm_provider_name="openrouter",
+        default_stt_model="whisper",
+        default_llm_model="gpt",
+        initial_settings={"pre_process_mode": "english", "input_source": "microphone"},
+    )
+
+    async with app.run_test():
+        prompt_manager.recent_prompts.assert_called_with()
+
+    assert prompt_manager.recent_prompts.call_count >= 1
+
+
+@pytest.mark.anyio
+async def test_file_path_input_accepts_keyboard_entry():
+    prompt_manager = Mock()
+    prompt_manager.count_prompts.return_value = 0
+    prompt_manager.recent_prompts.return_value = []
+
+    app = AitranscribeTUI(
+        prompt_manager=prompt_manager,
+        process_audio=Mock(),
+        process_file=Mock(),
+        stt_provider_name="Groq",
+        llm_provider_name="openrouter",
+        default_stt_model="whisper",
+        default_llm_model="gpt",
+        initial_settings={"pre_process_mode": "english", "input_source": "file"},
+    )
+
+    async with app.run_test() as pilot:
+        file_input = app.query_one("#file_path", Input)
+        app.set_focus(file_input)
+        await pilot.press("/", "t", "m", "p", "/", "a", ".", "m", "p", "3")
+        assert file_input.value == "/tmp/a.mp3"

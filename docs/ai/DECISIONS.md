@@ -38,3 +38,9 @@ Each entry documents WHAT was decided and WHY.
 - **Reason**: The TUI is now the primary workflow, so it should reopen with the user's last choices and let users transcribe existing audio files without dropping to legacy CLI flags.
 - **Considered**: Keeping source selection outside the TUI or treating file transcription as CLI-only.
 - **Tradeoff**: The config file is updated more frequently during interactive use.
+
+## 2026-03-09: Show Full Stored History In The TUI
+- **Choice**: Populate the `Transcriptions` pane from the full database ordered by `created_at DESC` instead of limiting it to a handful of recent items.
+- **Reason**: The pane is now the main browsing surface for saved transcriptions, so users need to scroll through the entire history there.
+- **Considered**: Keeping the short recent-only list and relying on CLI commands for deeper history access.
+- **Tradeoff**: Very large histories may make the sidebar list heavier to render.

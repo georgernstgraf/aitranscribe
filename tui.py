@@ -199,12 +199,6 @@ class AitranscribeTUI(App[None]):
         margin-bottom: 1;
     }
 
-    #config_panel Input {
-        height: 1;
-        min-height: 1;
-        padding: 0 1;
-    }
-
     Input {
         width: 100%;
         margin-bottom: 0;
@@ -348,6 +342,10 @@ class AitranscribeTUI(App[None]):
         self.query_one("#status_panel", Static).update(f"{self.status_text}\n{hint}")
 
     def _focus_initial_widget(self) -> None:
+        if self.input_source == "file":
+            self.set_focus(self.query_one("#file_path", Input))
+            return
+
         history_list = self.query_one("#history_list", OptionList)
         self.set_focus(history_list)
         if self.history_prompts:
@@ -406,7 +404,7 @@ class AitranscribeTUI(App[None]):
         history_list = self.query_one("#history_list", OptionList)
         panel_width = max(history_list.size.width, self.query_one("#history_panel", Vertical).size.width)
         snippet_width = max(28, panel_width - 8)
-        self.history_prompts = self.prompt_manager.recent_prompts(limit=6)
+        self.history_prompts = self.prompt_manager.recent_prompts()
         self.query_one("#history_summary", Static).update(f"Stored: {count} | Arrows to preview")
 
         if not self.history_prompts:
@@ -606,6 +604,8 @@ class AitranscribeTUI(App[None]):
             self.input_source = event.pressed.id.removeprefix("source-")
             self.persist_setting_value("input_source", self.input_source)
             self.status_text = "Press Space to Start Recording" if self.input_source == "microphone" else "Press Enter on File to Transcribe"
+            if self.input_source == "file":
+                self.set_focus(self.query_one("#file_path", Input))
             self.refresh_status()
         elif event.radio_set.id == "preprocess_modes" and event.pressed.id:
             self.pre_process_mode = event.pressed.id.removeprefix("mode-")

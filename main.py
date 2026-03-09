@@ -400,7 +400,7 @@ class PromptManager:
         query = """
             SELECT id, prompt, filename, created_at
             FROM prompts
-            ORDER BY id {order}
+            ORDER BY created_at {order}, id {order}
         """.format(order=order)
         params: tuple[Any, ...] = ()
         if limit is not None:
@@ -424,7 +424,7 @@ class PromptManager:
             console.print(f"Warning: Could not query prompts database: {e}")
             return []
 
-    def recent_prompts(self, limit: int = 5) -> list[dict[str, Any]]:
+    def recent_prompts(self, limit: int | None = None) -> list[dict[str, Any]]:
         return self._get_prompts(order="DESC", limit=limit)
 
     def count_prompts(self) -> int:

@@ -18,6 +18,8 @@ Move AI Transcribe from a CLI-first recorder to a TUI-first transcription workfl
 - [x] Made `english` the default TUI preprocessing mode and persisted TUI choices directly into config.
 - [x] Added filesystem audio transcription to the TUI `Recording Mode` panel and kept queue storage always on.
 - [x] Removed application-managed temp cleanup and switched temp recording copies to three-digit suffixes like `v001`.
+- [x] Made the `Transcriptions` pane scroll through the full stored history in newest-first order.
+- [x] Restored direct typing in the TUI `File` input and documented the `xclip` / `wl-clipboard` clipboard helpers in `README.md`.
 
 ## Pending
 - [ ] Manually validate the TUI workflow in a real terminal with microphone access.

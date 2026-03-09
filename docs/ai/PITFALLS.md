@@ -12,3 +12,4 @@ Read this file carefully before making changes in affected areas.
 - Clipboard helpers may be missing from the environment; `xclip` / `wl-copy` availability materially changes whether explicit copy works without falling back to OSC52.
 - TUI model and file-path inputs now persist through `Input` events, so avoid persisting empty model values and expect the config file to change during typing.
 - The filesystem-file path is transcribed from the `file_path` input submission path; pressing `Space` should remain microphone-only behavior.
+- A forced `height: 1` override on `Textual` `Input` widgets can break practical text entry; keep file-path entry using the default input behavior.

@@ -9,7 +9,7 @@ A TUI-first terminal app and Android app for audio transcription and LLM post-pr
 * **📁 File Transcription:** Process local audio and video files (`.mp3`, `.wav`, `.mp4`, `.m4a`, etc.) using Groq's whisper models.
 * **✂️ Auto-Chunking:** Automatically splits large audio files to bypass standard API file size limits (GROQ currently limits audio files to 25MB).
 * **✨ LLM Post-Processing:** Refine your transcriptions using LLMs for grammar correction, summarization, or translation. Supports OpenRouter, Cohere, and z.ai.
-* **📜 Prompt Management:** Local queue to store transcription history, review unread items, and mark all transcriptions as read from the TUI.
+* **📜 Prompt Management:** Local queue to store transcription history and review saved transcriptions from the TUI.
 
 ## 🛠️ Technology Stack
 
@@ -38,6 +38,10 @@ Before you begin, ensure you have the following installed on your system:
     * **macOS:** `brew install ffmpeg`
     * **Linux (Ubuntu/Debian):** `sudo apt install ffmpeg`
     * **Windows:** `winget install ffmpeg` or download from [ffmpeg.org](https://ffmpeg.org/download.html).
+3. **Clipboard helpers for the TUI copy action (`C`):**
+    * **X11:** `xclip`
+    * **Wayland:** `wl-clipboard`
+    * **Linux (Ubuntu/Debian):** `sudo apt install xclip wl-clipboard`
 
 ## 💻 Installation
 
@@ -147,10 +151,11 @@ aitranscribe
 ```
 
 Inside the TUI you can:
+- switch between microphone recording and filesystem file transcription in `Recording Mode`
+- enter a file path in the `File` field and press `Enter` to transcribe it when `Filesystem file` is selected
 - switch the pre-processing mode between raw transcription, cleanup, and English translation
 - inspect a four-line feedback log for STT and pre-processing progress
 - configure models and extra settings in dedicated panels
-- mark all unread transcriptions as read with the on-screen button
 
 **Transcribe a local file:**
 ```bash
@@ -177,11 +182,6 @@ aitranscribe --file meeting.wav --post-process "Summarize this meeting into bull
 aitranscribe --list      # Show all stored transcriptions
 aitranscribe --query     # Retrieve the oldest transcription from the queue
 aitranscribe --remove 1  # Remove a specific transcription by its ID
-```
-
-**Start fresh (Clean up temp files):**
-```bash
-aitranscribe --new
 ```
 
 ## 🧪 Testing
