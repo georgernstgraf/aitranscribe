@@ -33,6 +33,7 @@ try:
         get_recording_file_paths,
         get_tui_settings,
         launch_tui,
+        backfill_missing_summaries,
         console,
         CONFIG_FILE,
         stt_client,
@@ -352,6 +353,76 @@ def test_promptmanager_update_prompt_by_id():
         assert prompt_id is not None
         assert manager.update_prompt(prompt_id, "Edited") is True
         assert manager.recent_prompts()[0]["prompt"] == "Edited"
+    finally:
+        temp_file.unlink()
+
+
+def test_promptmanager_migrates_existing_database_to_add_summary_column():
+    with tempfile.NamedTemporaryFile(mode='w', suffix='.sqlite', delete=False) as f:
+        temp_file = Path(f.name)
+
+    try:
+        with sqlite3.connect(temp_file) as conn:
+            conn.execute(
+                """
+                CREATE TABLE prompts (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    prompt TEXT NOT NULL,
+                    filename TEXT NOT NULL,
+                    created_at TEXT NOT NULL
+                )
+                """
+            )
+
+        manager = PromptManager(temp_file)
+
+        with sqlite3.connect(temp_file) as conn:
+            columns = conn.execute("PRAGMA table_info(prompts)").fetchall()
+
+        assert any(column[1] == "summary" for column in columns)
+        assert manager.prompts_missing_summary() == []
+    finally:
+        temp_file.unlink()
+
+
+def test_promptmanager_can_update_summary_and_return_it_in_recent_prompts():
+    with tempfile.NamedTemporaryFile(mode='w', suffix='.sqlite', delete=False) as f:
+        temp_file = Path(f.name)
+
+    try:
+        manager = PromptManager(temp_file)
+        prompt_id = manager.add_prompt("Original transcript", "file1.mp3")
+
+        assert prompt_id is not None
+        assert manager.update_prompt_summary(prompt_id, "This is the generated summary text for preview.") is True
+        assert manager.recent_prompts()[0]["summary"] == "This is the generated summary text for preview."
+    finally:
+        temp_file.unlink()
+
+
+def test_backfill_missing_summaries_updates_only_missing_rows():
+    with tempfile.NamedTemporaryFile(mode='w', suffix='.sqlite', delete=False) as f:
+        temp_file = Path(f.name)
+
+    try:
+        manager = PromptManager(temp_file)
+        missing_id = manager.add_prompt("Long transcript that still needs a summary.", "file1.mp3")
+        existing_id = manager.add_prompt("Transcript with summary.", "file2.mp3", summary="Existing summary")
+
+        assert missing_id is not None
+        assert existing_id is not None
+
+        with patch("main.llm_client", object()):
+            with patch("main.process_with_llm", return_value="Fresh generated summary") as mock_process:
+                updated = backfill_missing_summaries(manager, "gpt-test")
+
+        prompts = manager.recent_prompts()
+        by_id = {prompt["id"]: prompt for prompt in prompts}
+
+        assert updated == 1
+        assert by_id[missing_id]["summary"] == "Fresh generated summary"
+        assert by_id[existing_id]["summary"] == "Existing summary"
+        mock_process.assert_called_once()
     finally:
         temp_file.unlink()
 

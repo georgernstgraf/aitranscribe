@@ -44,3 +44,9 @@ Each entry documents WHAT was decided and WHY.
 - **Reason**: The pane is now the main browsing surface for saved transcriptions, so users need to scroll through the entire history there.
 - **Considered**: Keeping the short recent-only list and relying on CLI commands for deeper history access.
 - **Tradeoff**: Very large histories may make the sidebar list heavier to render.
+
+## 2026-03-10: Generate Stored Transcription Summaries Asynchronously
+- **Choice**: Add a nullable `summary` column to stored transcriptions, backfill missing summaries only on TUI/default startup, and generate summaries for new transcriptions in the background after the full transcript is already visible.
+- **Reason**: The history pane needs concise 70-80 character previews, but the main transcription workflow should remain fast and show the full transcript without waiting for a third LLM request.
+- **Considered**: Blocking startup on summary backfill, generating summaries on every CLI invocation, or waiting for summary generation before displaying new transcripts.
+- **Tradeoff**: The history list can briefly show fallback transcript snippets until background summary jobs finish, and summaries remain null when LLM generation is unavailable or fails.

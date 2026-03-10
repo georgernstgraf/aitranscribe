@@ -21,6 +21,8 @@ from textual.widgets.option_list import Option
 FeedbackCallback = Callable[[str, str], None]
 ProcessAudioCallback = Callable[[np.ndarray, dict[str, Any], FeedbackCallback], dict[str, str]]
 ProcessFileCallback = Callable[[str, dict[str, Any], FeedbackCallback], dict[str, str]]
+GenerateSummaryCallback = Callable[[str, str], str | None]
+BackfillSummariesCallback = Callable[[], int]
 
 
 def get_clipboard_command(environ: Mapping[str, str] | None = None) -> list[str] | None:
@@ -266,12 +268,16 @@ class AitranscribeTUI(App[None]):
         default_llm_model: str,
         initial_settings: dict[str, Any] | None = None,
         persist_setting: Callable[[str, Any], None] | None = None,
+        generate_summary: GenerateSummaryCallback | None = None,
+        backfill_summaries: BackfillSummariesCallback | None = None,
     ) -> None:
         super().__init__()
         self.prompt_manager = prompt_manager
         self.process_audio = process_audio
         self.process_file = process_file
         self.persist_setting = persist_setting
+        self.generate_summary = generate_summary
+        self.backfill_summaries = backfill_summaries
         self.stt_provider_name = stt_provider_name
         self.llm_provider_name = llm_provider_name
         self.default_stt_model = default_stt_model
@@ -336,6 +342,8 @@ class AitranscribeTUI(App[None]):
         self.refresh_feedback()
         self.refresh_history()
         self._focus_initial_widget()
+        if self.backfill_summaries is not None:
+            self.run_worker(self.backfill_summaries_worker, thread=True, exclusive=False)
 
     def refresh_status(self) -> None:
         action = "Space=record" if self.input_source == "microphone" else "Enter on File=transcribe"
@@ -417,7 +425,9 @@ class AitranscribeTUI(App[None]):
         options = []
         selected_index: int | None = None
         for index, prompt in enumerate(self.history_prompts):
-            shortened = textwrap.shorten(prompt["prompt"].replace("\n", " "), width=snippet_width, placeholder="...")
+            summary_text = str(prompt.get("summary") or "").strip()
+            preview_source = summary_text or str(prompt["prompt"])
+            shortened = textwrap.shorten(preview_source.replace("\n", " "), width=snippet_width, placeholder="...")
             options.append(Option(f"#{prompt['id']}: {shortened}", id=f"history-{prompt['id']}"))
             if prompt["id"] == self.selected_history_id:
                 selected_index = index
@@ -585,6 +595,30 @@ class AitranscribeTUI(App[None]):
         self.refresh_transcript()
         self.refresh_status()
         self.refresh_history()
+        prompt_id = result.get("prompt_id", "").strip()
+        if prompt_id:
+            self.run_worker(lambda: self.generate_summary_for_prompt_worker(int(prompt_id), self.latest_transcript), thread=True, exclusive=False)
+
+    def backfill_summaries_worker(self) -> None:
+        try:
+            updated = self.backfill_summaries() if self.backfill_summaries is not None else 0
+        except Exception:
+            return
+        if updated:
+            self.call_from_thread(self.refresh_history)
+
+    def generate_summary_for_prompt_worker(self, prompt_id: int, prompt_text: str) -> None:
+        if self.generate_summary is None:
+            return
+        try:
+            summary = self.generate_summary(prompt_text, self.query_one("#llm_model", Input).value.strip() or self.default_llm_model)
+        except Exception:
+            return
+        if not summary:
+            return
+        updated = self.prompt_manager.update_prompt_summary(prompt_id, summary)
+        if updated:
+            self.call_from_thread(self.refresh_history)
 
     def action_save_transcript(self) -> None:
         text = self.get_editor_text().strip()

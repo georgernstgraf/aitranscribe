@@ -12,12 +12,16 @@ Follow these without question. Do not deviate unless explicitly told.
 ## API Patterns
 - For TUI-triggered transcription work, send progress through a callback keyed by the four fixed feedback IDs: `stt_send`, `stt_response`, `pre_send`, and `pre_response`.
 
+## Database
+- Keep prompt summaries nullable in SQLite and migrate older `prompts` tables in place by adding `summary` instead of rebuilding the whole database when only that column is missing.
+
 ## UI Patterns
 - Wrap transcript and preview text to the actual panel width; do not reintroduce fixed-width wrapping like the removed 68-character limit.
 - Use `Checkbox` for compact boolean settings in the sidebar instead of `Switch`, which rendered and behaved poorly in this layout.
 - Drive stored-transcription navigation with `OptionList`; the highlighted entry is the source of truth for transcript preview while the app is idle.
 - Keep the transcription list focused on mount so arrow keys work immediately when the app opens.
 - The `Transcriptions` pane should show the full stored history ordered newest-first, not a small recent slice.
+- The `Transcriptions` pane should prefer stored `summary` text for list rows and fall back to shortened full transcript text only while a summary is still missing.
 - Keep source selection and file-path entry inside the `Recording Mode` panel; microphone and filesystem transcription are two inputs to the same workflow.
 - Persist user-adjustable TUI choices directly to `CONFIG_FILE` instead of keeping them session-local.
 

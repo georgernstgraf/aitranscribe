@@ -77,7 +77,7 @@ def test_history_selection_controls_displayed_transcript():
         initial_settings={"pre_process_mode": "english", "input_source": "microphone"},
     )
     app.latest_transcript = "Newest transcript"
-    app.history_prompts = [{"id": 7, "prompt": "Stored unread transcript"}]
+    app.history_prompts = [{"id": 7, "prompt": "Stored unread transcript", "summary": None}]
 
     app.select_history_prompt(0)
 
@@ -138,8 +138,8 @@ async def test_refresh_history_requests_full_history_list():
     prompt_manager = Mock()
     prompt_manager.count_prompts.return_value = 2
     prompt_manager.recent_prompts.return_value = [
-        {"id": 2, "prompt": "Newest", "filename": "b.mp3", "timestamp": "2026-03-09T12:00:00"},
-        {"id": 1, "prompt": "Older", "filename": "a.mp3", "timestamp": "2026-03-09T11:00:00"},
+        {"id": 2, "prompt": "Newest", "filename": "b.mp3", "timestamp": "2026-03-09T12:00:00", "summary": None},
+        {"id": 1, "prompt": "Older", "filename": "a.mp3", "timestamp": "2026-03-09T11:00:00", "summary": None},
     ]
 
     app = AitranscribeTUI(
@@ -188,7 +188,7 @@ async def test_save_transcript_updates_selected_history_entry():
     prompt_manager = Mock()
     prompt_manager.count_prompts.return_value = 1
     prompt_manager.recent_prompts.return_value = [
-        {"id": 7, "prompt": "Stored transcript", "filename": "a.mp3", "timestamp": "2026-03-09T11:00:00"},
+        {"id": 7, "prompt": "Stored transcript", "filename": "a.mp3", "timestamp": "2026-03-09T11:00:00", "summary": None},
     ]
     prompt_manager.update_prompt.return_value = True
 
@@ -216,7 +216,7 @@ async def test_delete_selected_transcription_uses_delete_key_on_history_list():
     prompt_manager = Mock()
     prompt_manager.count_prompts.return_value = 1
     prompt_manager.recent_prompts.return_value = [
-        {"id": 7, "prompt": "Stored transcript", "filename": "a.mp3", "timestamp": "2026-03-09T11:00:00"},
+        {"id": 7, "prompt": "Stored transcript", "filename": "a.mp3", "timestamp": "2026-03-09T11:00:00", "summary": None},
     ]
     prompt_manager.remove_prompt_by_id.return_value = True
 
@@ -264,3 +264,64 @@ async def test_ctrl_shift_c_copies_full_editor_text_while_editing():
             await pilot.press("ctrl+shift+c")
 
     mock_copy.assert_called_with("Edited transcript\nSecond line")
+
+
+@pytest.mark.anyio
+async def test_refresh_history_prefers_summary_text_in_list_entries():
+    prompt_manager = Mock()
+    prompt_manager.count_prompts.return_value = 1
+    prompt_manager.recent_prompts.return_value = [
+        {
+            "id": 7,
+            "prompt": "Full transcript body that should not be used in the list when summary exists.",
+            "filename": "a.mp3",
+            "timestamp": "2026-03-09T11:00:00",
+            "summary": "Short generated summary for list preview.",
+        },
+    ]
+
+    app = AitranscribeTUI(
+        prompt_manager=prompt_manager,
+        process_audio=Mock(),
+        process_file=Mock(),
+        stt_provider_name="Groq",
+        llm_provider_name="openrouter",
+        default_stt_model="whisper",
+        default_llm_model="gpt",
+        initial_settings={"pre_process_mode": "english", "input_source": "microphone"},
+    )
+
+    async with app.run_test():
+        history_list = app.query_one("#history_list", OptionList)
+        option_prompt = history_list.get_option_at_index(0).prompt
+
+    assert "Short generated summary" in str(option_prompt)
+    assert "Full transcript body" not in str(option_prompt)
+
+
+@pytest.mark.anyio
+async def test_processing_finished_starts_background_summary_generation_for_saved_prompt():
+    prompt_manager = Mock()
+    prompt_manager.count_prompts.return_value = 1
+    prompt_manager.recent_prompts.return_value = [
+        {"id": 7, "prompt": "Stored transcript", "filename": "a.mp3", "timestamp": "2026-03-09T11:00:00", "summary": None},
+    ]
+    prompt_manager.update_prompt_summary.return_value = True
+
+    app = AitranscribeTUI(
+        prompt_manager=prompt_manager,
+        process_audio=Mock(),
+        process_file=Mock(),
+        stt_provider_name="Groq",
+        llm_provider_name="openrouter",
+        default_stt_model="whisper",
+        default_llm_model="gpt",
+        initial_settings={"pre_process_mode": "english", "input_source": "microphone"},
+        generate_summary=Mock(return_value="Generated summary"),
+    )
+
+    async with app.run_test():
+        app.processing_finished({"text": "Fresh transcript", "file_path": "/tmp/a.mp3", "prompt_id": "7"})
+        await app.workers.wait_for_complete()
+
+    prompt_manager.update_prompt_summary.assert_called_with(7, "Generated summary")

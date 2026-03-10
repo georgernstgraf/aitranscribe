@@ -37,6 +37,11 @@ PRE_PROCESS_MODES = {
     },
 }
 
+SUMMARY_PROMPT = (
+    "Create a concise summary of the transcription in 70 to 80 characters. "
+    "Output only the summary text with no quotes, labels, or extra commentary."
+)
+
 LLM_PROVIDERS = {
     "openrouter": {
         "base_url": "https://openrouter.ai/api/v1",
@@ -363,7 +368,8 @@ class PromptManager:
                             id INTEGER PRIMARY KEY AUTOINCREMENT,
                             prompt TEXT NOT NULL,
                             filename TEXT NOT NULL,
-                            created_at TEXT NOT NULL
+                            created_at TEXT NOT NULL,
+                            summary TEXT DEFAULT NULL
                         )
                         """
                     )
@@ -375,19 +381,22 @@ class PromptManager:
                             id INTEGER PRIMARY KEY AUTOINCREMENT,
                             prompt TEXT NOT NULL,
                             filename TEXT NOT NULL,
-                            created_at TEXT NOT NULL
+                            created_at TEXT NOT NULL,
+                            summary TEXT DEFAULT NULL
                         )
                         """
                     )
                     conn.execute(
                         """
-                        INSERT INTO prompts (id, prompt, filename, created_at)
-                        SELECT id, prompt, filename, created_at
+                        INSERT INTO prompts (id, prompt, filename, created_at, summary)
+                        SELECT id, prompt, filename, created_at, NULL
                         FROM prompts_legacy
                         ORDER BY id ASC
                         """
                     )
                     conn.execute("DROP TABLE prompts_legacy")
+                elif not any(column[1] == "summary" for column in columns):
+                    conn.execute("ALTER TABLE prompts ADD COLUMN summary TEXT DEFAULT NULL")
         except Exception as e:
             console.print(f"Warning: Could not initialize prompts database: {e}")
 
@@ -398,7 +407,7 @@ class PromptManager:
 
     def _get_prompts(self, *, order: str = "ASC", limit: int | None = None) -> list[dict[str, Any]]:
         query = """
-            SELECT id, prompt, filename, created_at
+            SELECT id, prompt, filename, created_at, summary
             FROM prompts
             ORDER BY created_at {order}, id {order}
         """.format(order=order)
@@ -417,6 +426,7 @@ class PromptManager:
                         "prompt": row[1],
                         "filename": row[2],
                         "timestamp": row[3],
+                        "summary": row[4],
                     }
                     for row in rows
                 ]
@@ -436,17 +446,17 @@ class PromptManager:
             console.print(f"Warning: Could not count prompts: {e}")
             return 0
 
-    def add_prompt(self, prompt: str, filename: str) -> int | None:
+    def add_prompt(self, prompt: str, filename: str, summary: str | None = None) -> int | None:
         """Add a new prompt to the queue."""
         created_at = datetime.datetime.now().isoformat()
         try:
             with self._connect() as conn:
                 cursor = conn.execute(
                     """
-                    INSERT INTO prompts (prompt, filename, created_at)
-                    VALUES (?, ?, ?)
+                    INSERT INTO prompts (prompt, filename, created_at, summary)
+                    VALUES (?, ?, ?, ?)
                     """,
-                    (prompt, filename, created_at),
+                    (prompt, filename, created_at, summary),
                 )
                 lastrowid = cursor.lastrowid
                 return int(lastrowid) if lastrowid is not None else None
@@ -466,6 +476,44 @@ class PromptManager:
         except Exception as e:
             console.print(f"Warning: Could not update prompt: {e}")
             return False
+
+    def update_prompt_summary(self, prompt_id: int, summary: str) -> bool:
+        """Update a stored prompt summary by database id."""
+        try:
+            with self._connect() as conn:
+                cursor = conn.execute(
+                    "UPDATE prompts SET summary = ? WHERE id = ?",
+                    (summary, prompt_id),
+                )
+                return cursor.rowcount > 0
+        except Exception as e:
+            console.print(f"Warning: Could not update prompt summary: {e}")
+            return False
+
+    def prompts_missing_summary(self) -> list[dict[str, Any]]:
+        try:
+            with self._connect() as conn:
+                rows = conn.execute(
+                    """
+                    SELECT id, prompt, filename, created_at, summary
+                    FROM prompts
+                    WHERE summary IS NULL OR TRIM(summary) = ''
+                    ORDER BY created_at DESC, id DESC
+                    """
+                ).fetchall()
+                return [
+                    {
+                        "id": row[0],
+                        "prompt": row[1],
+                        "filename": row[2],
+                        "timestamp": row[3],
+                        "summary": row[4],
+                    }
+                    for row in rows
+                ]
+        except Exception as e:
+            console.print(f"Warning: Could not query prompts missing summary: {e}")
+            return []
 
     def remove_prompt_by_id(self, prompt_id: int) -> bool:
         """Remove a stored prompt by database id."""
@@ -536,6 +584,29 @@ class PromptManager:
             console.print(f"Warning: Could not remove prompt: {e}")
             return False
 
+
+def generate_prompt_summary(text: str, llm_model: str) -> str | None:
+    cleaned = text.strip()
+    if not cleaned or not llm_client:
+        return None
+
+    summary = process_with_llm(llm_client, cleaned, SUMMARY_PROMPT, llm_model).strip()
+    return summary or None
+
+
+def backfill_missing_summaries(manager: PromptManager, llm_model: str) -> int:
+    if not llm_client:
+        return 0
+
+    updated = 0
+    for prompt in manager.prompts_missing_summary():
+        summary = generate_prompt_summary(str(prompt.get("prompt", "")), llm_model)
+        if not summary:
+            continue
+        if manager.update_prompt_summary(int(prompt["id"]), summary):
+            updated += 1
+    return updated
+
 # Initialize PromptManager
 prompt_manager = PromptManager(PROMPTS_FILE)
 
@@ -583,9 +654,9 @@ def process_recorded_audio_for_tui(
             update_feedback("pre_send", "skipped")
             update_feedback("pre_response", "skipped")
 
-        prompt_manager.add_prompt(final_text, final_mp3_file)
+        prompt_id = prompt_manager.add_prompt(final_text, final_mp3_file)
 
-        return {"text": final_text, "file_path": final_mp3_file}
+        return {"text": final_text, "file_path": final_mp3_file, "prompt_id": str(prompt_id) if prompt_id is not None else ""}
     finally:
         if os.path.exists(raw_wav_file):
             os.remove(raw_wav_file)
@@ -648,8 +719,12 @@ def process_file_for_tui(
             update_feedback("pre_send", "skipped")
             update_feedback("pre_response", "skipped")
 
-        prompt_manager.add_prompt(final_text, file_for_processing)
-        return {"text": final_text or "No transcript returned.", "file_path": file_for_processing}
+        prompt_id = prompt_manager.add_prompt(final_text, file_for_processing)
+        return {
+            "text": final_text or "No transcript returned.",
+            "file_path": file_for_processing,
+            "prompt_id": str(prompt_id) if prompt_id is not None else "",
+        }
     except Exception:
         if file_for_processing == working_file and os.path.exists(working_file):
             pass
@@ -670,6 +745,8 @@ def launch_tui() -> None:
         default_llm_model=settings["llm_model"],
         initial_settings=settings,
         persist_setting=persist_tui_setting,
+        generate_summary=generate_prompt_summary,
+        backfill_summaries=lambda: backfill_missing_summaries(prompt_manager, settings["llm_model"]),
     )
     app.run()
 
