@@ -14,3 +14,4 @@ Read this file carefully before making changes in affected areas.
 - The filesystem-file path is transcribed from the `file_path` input submission path; pressing `Space` should remain microphone-only behavior.
 - A forced `height: 1` override on `Textual` `Input` widgets can break practical text entry; keep file-path entry using the default input behavior.
 - When using `gh issue create` or `gh issue comment` from Bash, do not put backticks inside a double-quoted `--body`; the shell will execute them unless you use a heredoc or otherwise escape them.
+- `OptionList.size.width` can be misleading on the initial TUI render; use live content-region widths with a fallback to avoid premature ellipses in history rows at startup.

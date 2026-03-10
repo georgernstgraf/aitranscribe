@@ -50,3 +50,9 @@ Each entry documents WHAT was decided and WHY.
 - **Reason**: The history pane needs concise 70-80 character previews, but the main transcription workflow should remain fast and show the full transcript without waiting for a third LLM request.
 - **Considered**: Blocking startup on summary backfill, generating summaries on every CLI invocation, or waiting for summary generation before displaying new transcripts.
 - **Tradeoff**: The history list can briefly show fallback transcript snippets until background summary jobs finish, and summaries remain null when LLM generation is unavailable or fails.
+
+## 2026-03-10: Collapse Feedback Log To User-Visible Processing Phases
+- **Choice**: Replace the old send/response feedback rows with four user-facing phases: compress, transcribe, post-process, and summary.
+- **Reason**: Users understand workflow progress better when the log reflects meaningful stages instead of internal request boundaries, and raw STT text can appear immediately after transcription completes.
+- **Considered**: Keeping the five-row low-level log, or only adding compression while leaving send/response rows intact.
+- **Tradeoff**: The feedback log is less granular about provider request boundaries, but much clearer about the actual processing pipeline.

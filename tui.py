@@ -19,8 +19,9 @@ from textual.widgets.option_list import Option
 
 
 FeedbackCallback = Callable[[str, str], None]
-ProcessAudioCallback = Callable[[np.ndarray, dict[str, Any], FeedbackCallback], dict[str, str]]
-ProcessFileCallback = Callable[[str, dict[str, Any], FeedbackCallback], dict[str, str]]
+TranscriptCallback = Callable[[str], None]
+ProcessAudioCallback = Callable[[np.ndarray, dict[str, Any], FeedbackCallback, TranscriptCallback], dict[str, Any]]
+ProcessFileCallback = Callable[[str, dict[str, Any], FeedbackCallback, TranscriptCallback], dict[str, Any]]
 GenerateSummaryCallback = Callable[[str, str], str | None]
 BackfillSummariesCallback = Callable[[], int]
 
@@ -240,10 +241,10 @@ class AitranscribeTUI(App[None]):
     ]
 
     FEEDBACK_STEPS = [
-        ("stt_send", "Send Message to STT Provider"),
-        ("stt_response", "Got Response from Whisper"),
-        ("pre_send", "Sending to Pre-Processor"),
-        ("pre_response", "Got Response from Pre-Processor"),
+        ("compress", "Compressing Message"),
+        ("transcribe", "Transcribing Raw Message"),
+        ("post_process", "Post-Processing Message"),
+        ("summary", "Creating Summary"),
     ]
 
     INTERACTIVE_WIDGET_IDS = {
@@ -297,6 +298,7 @@ class AitranscribeTUI(App[None]):
         self.latest_file_path: str | None = None
         self.status_text = "Press Space to Start Recording" if self.input_source == "microphone" else "Press Enter on File to Transcribe"
         self.feedback_state = {step_id: "pending" for step_id, _ in self.FEEDBACK_STEPS}
+        self.raw_transcript: str | None = None
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True)
@@ -411,8 +413,7 @@ class AitranscribeTUI(App[None]):
     def refresh_history(self) -> None:
         count = self.prompt_manager.count_prompts()
         history_list = self.query_one("#history_list", OptionList)
-        panel_width = max(history_list.size.width, self.query_one("#history_panel", Vertical).size.width)
-        snippet_width = max(28, panel_width - 8)
+        available_width = self._history_preview_width()
         self.history_prompts = self.prompt_manager.recent_prompts()
         self.query_one("#history_summary", Static).update(f"Stored: {count} | Arrows to preview")
 
@@ -427,7 +428,9 @@ class AitranscribeTUI(App[None]):
         for index, prompt in enumerate(self.history_prompts):
             summary_text = str(prompt.get("summary") or "").strip()
             preview_source = summary_text or str(prompt["prompt"])
-            shortened = textwrap.shorten(preview_source.replace("\n", " "), width=snippet_width, placeholder="...")
+            prefix = f"#{prompt['id']}: "
+            text_width = max(8, available_width - len(prefix))
+            shortened = textwrap.shorten(preview_source.replace("\n", " "), width=text_width, placeholder="...")
             options.append(Option(f"#{prompt['id']}: {shortened}", id=f"history-{prompt['id']}"))
             if prompt["id"] == self.selected_history_id:
                 selected_index = index
@@ -440,6 +443,21 @@ class AitranscribeTUI(App[None]):
             if history_list.highlighted is None or history_list.highlighted >= len(options):
                 history_list.highlighted = 0
             self.select_history_prompt(history_list.highlighted)
+
+    def _history_preview_width(self) -> int:
+        history_list = self.query_one("#history_list", OptionList)
+        history_panel = self.query_one("#history_panel", Vertical)
+        width_candidates = [
+            history_list.content_region.width,
+            history_list.scrollable_content_region.width,
+            history_list.size.width,
+            history_panel.content_region.width,
+            history_panel.size.width,
+        ]
+        concrete_widths = [width for width in width_candidates if width > 0]
+        if not concrete_widths:
+            return 72
+        return max(12, max(concrete_widths) - 6)
 
     def on_resize(self, event: Resize) -> None:
         del event
@@ -487,6 +505,7 @@ class AitranscribeTUI(App[None]):
         self.is_recording = True
         self.clear_history_selection()
         self.latest_file_path = None
+        self.raw_transcript = None
         self.latest_transcript = "Recording in progress..."
         self.status_text = "Press Space again to Finish"
         self.reset_feedback()
@@ -505,6 +524,7 @@ class AitranscribeTUI(App[None]):
             return
 
         self.is_processing = True
+        self.raw_transcript = None
         self.status_text = "Processing recording..."
         self.latest_transcript = "Waiting for transcription..."
         self.refresh_status()
@@ -521,6 +541,7 @@ class AitranscribeTUI(App[None]):
 
         self.is_processing = True
         self.clear_history_selection()
+        self.raw_transcript = None
         self.latest_transcript = f"Transcribing file: {file_path}"
         self.latest_file_path = file_path
         self.status_text = "Processing file..."
@@ -548,12 +569,20 @@ class AitranscribeTUI(App[None]):
         self.feedback_state[step_id] = state
         self.refresh_feedback()
 
+    def update_transcript_from_worker(self, text: str) -> None:
+        self.raw_transcript = text
+        self.latest_transcript = text or "No transcript returned."
+        self.refresh_transcript()
+
     def process_audio_worker(self, audio: np.ndarray, settings: dict[str, Any]) -> None:
         def feedback(step_id: str, state: str) -> None:
             self.call_from_thread(self.update_feedback_state, step_id, state)
 
+        def transcript_callback(text: str) -> None:
+            self.call_from_thread(self.update_transcript_from_worker, text)
+
         try:
-            result = self.process_audio(audio, settings, feedback)
+            result = self.process_audio(audio, settings, feedback, transcript_callback)
         except Exception as exc:
             self.call_from_thread(self.processing_failed, str(exc))
             return
@@ -564,8 +593,11 @@ class AitranscribeTUI(App[None]):
         def feedback(step_id: str, state: str) -> None:
             self.call_from_thread(self.update_feedback_state, step_id, state)
 
+        def transcript_callback(text: str) -> None:
+            self.call_from_thread(self.update_transcript_from_worker, text)
+
         try:
-            result = self.process_file(file_path, settings, feedback)
+            result = self.process_file(file_path, settings, feedback, transcript_callback)
         except Exception as exc:
             self.call_from_thread(self.processing_failed, str(exc))
             return
@@ -579,6 +611,7 @@ class AitranscribeTUI(App[None]):
             if current == "active":
                 self.feedback_state[step_id] = "error"
         self.latest_transcript = error_message
+        self.raw_transcript = None
         self.latest_file_path = None
         retry_hint = "Press Space to try again." if self.input_source == "microphone" else "Press Enter on File to try again."
         self.status_text = f"Processing failed. {retry_hint}"
@@ -590,6 +623,7 @@ class AitranscribeTUI(App[None]):
         self.is_processing = False
         self.clear_history_selection()
         self.latest_transcript = result.get("text", "") or "No transcript returned."
+        self.raw_transcript = result.get("raw_text") or self.raw_transcript
         self.latest_file_path = result.get("file_path")
         self.status_text = "Press Space to Start Recording" if self.input_source == "microphone" else "File transcription finished. Press Enter on File to run again."
         self.refresh_transcript()
@@ -600,25 +634,36 @@ class AitranscribeTUI(App[None]):
             self.run_worker(lambda: self.generate_summary_for_prompt_worker(int(prompt_id), self.latest_transcript), thread=True, exclusive=False)
 
     def backfill_summaries_worker(self) -> None:
-        try:
-            updated = self.backfill_summaries() if self.backfill_summaries is not None else 0
-        except Exception:
+        if self.backfill_summaries is None:
             return
+        self.call_from_thread(self.update_feedback_state, "summary", "active")
+        try:
+            updated = self.backfill_summaries()
+        except Exception:
+            self.call_from_thread(self.update_feedback_state, "summary", "error")
+            return
+        self.call_from_thread(self.update_feedback_state, "summary", "done")
         if updated:
             self.call_from_thread(self.refresh_history)
 
     def generate_summary_for_prompt_worker(self, prompt_id: int, prompt_text: str) -> None:
         if self.generate_summary is None:
             return
+        self.call_from_thread(self.update_feedback_state, "summary", "active")
         try:
             summary = self.generate_summary(prompt_text, self.query_one("#llm_model", Input).value.strip() or self.default_llm_model)
         except Exception:
+            self.call_from_thread(self.update_feedback_state, "summary", "error")
             return
         if not summary:
+            self.call_from_thread(self.update_feedback_state, "summary", "pending")
             return
         updated = self.prompt_manager.update_prompt_summary(prompt_id, summary)
         if updated:
+            self.call_from_thread(self.update_feedback_state, "summary", "done")
             self.call_from_thread(self.refresh_history)
+        else:
+            self.call_from_thread(self.update_feedback_state, "summary", "error")
 
     def action_save_transcript(self) -> None:
         text = self.get_editor_text().strip()

@@ -3,14 +3,14 @@
 Current status as of 2026-03-10.
 
 ## Current Focus
-Refine the TUI-first transcription workflow around saved-history browsing and LLM-generated metadata.
+Polish the TUI transcription workflow so progress feedback and history previews match the actual rendered UI behavior.
 
 ## Completed (this cycle)
-- [x] Added a nullable `summary` column to stored transcriptions and migrated existing SQLite databases in place.
-- [x] Backfilled missing transcription summaries during TUI/default startup using the existing LLM post-processing client.
-- [x] Kept new transcript display fast by generating summaries for newly saved TUI transcriptions in background workers after the full transcript is shown.
-- [x] Updated the `Transcriptions` pane to display stored summaries instead of leading transcript words when summaries exist.
-- [x] Added regression tests for summary migration, summary backfill/update behavior, and TUI summary rendering/background generation.
+- [x] Replaced the old low-level feedback log with four user-facing phases: compress, transcribe, post-process, and summary.
+- [x] Made the transcript pane show raw STT text as soon as transcription completes, then replace it with post-processed text when that stage finishes.
+- [x] Restored the compact feedback log height to fit the new four-line phase model cleanly.
+- [x] Fixed startup-only history preview truncation so summaries use the full available sidebar row width before showing ellipses.
+- [x] Added regression tests for the new feedback-stage model, raw-transcript update behavior, and startup-safe history width calculation.
 
 ## Pending
 - [ ] Manually validate the TUI workflow in a real terminal with microphone access.
@@ -24,4 +24,4 @@ Refine the TUI-first transcription workflow around saved-history browsing and LL
 - None
 
 ## Next Session Suggestion
-Start with real-terminal validation of summary backfill and background summary refresh, then continue TUI polish based on what that session reveals.
+Start with a real TUI run to verify the four-phase feedback log, raw-transcript handoff, and startup history-width fix together, then continue polish from there.

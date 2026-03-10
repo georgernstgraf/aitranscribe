@@ -10,7 +10,7 @@ Follow these without question. Do not deviate unless explicitly told.
 - Keep the `Textual` UI in `tui.py` and keep API, recording, and persistence helpers in `main.py` until a larger refactor is requested.
 
 ## API Patterns
-- For TUI-triggered transcription work, send progress through a callback keyed by the four fixed feedback IDs: `stt_send`, `stt_response`, `pre_send`, and `pre_response`.
+- For TUI-triggered transcription work, send progress through the four high-level feedback IDs `compress`, `transcribe`, `post_process`, and `summary`, and use a separate transcript callback to surface raw STT text before post-processing finishes.
 
 ## Database
 - Keep prompt summaries nullable in SQLite and migrate older `prompts` tables in place by adding `summary` instead of rebuilding the whole database when only that column is missing.
@@ -22,6 +22,7 @@ Follow these without question. Do not deviate unless explicitly told.
 - Keep the transcription list focused on mount so arrow keys work immediately when the app opens.
 - The `Transcriptions` pane should show the full stored history ordered newest-first, not a small recent slice.
 - The `Transcriptions` pane should prefer stored `summary` text for list rows and fall back to shortened full transcript text only while a summary is still missing.
+- Compute history-row truncation from the live `OptionList` content width so startup layout does not add ellipses before the sidebar has reached its real size.
 - Keep source selection and file-path entry inside the `Recording Mode` panel; microphone and filesystem transcription are two inputs to the same workflow.
 - Persist user-adjustable TUI choices directly to `CONFIG_FILE` instead of keeping them session-local.
 

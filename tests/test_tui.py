@@ -10,7 +10,8 @@ import pytest
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from tui import AitranscribeTUI, build_osc52_sequence, copy_text_to_clipboard, copy_text_with_osc52, get_clipboard_command
-from textual.widgets import Input, OptionList, TextArea
+from textual.containers import Vertical
+from textual.widgets import Input, OptionList, Static, TextArea
 
 
 def test_get_clipboard_command_prefers_wl_copy_on_wayland():
@@ -131,6 +132,74 @@ def test_tui_keeps_verbose_from_config_without_widget():
     )
 
     assert app.verbose is True
+
+
+def test_feedback_steps_include_compress_stage_first():
+    app = AitranscribeTUI(
+        prompt_manager=Mock(),
+        process_audio=Mock(),
+        process_file=Mock(),
+        stt_provider_name="Groq",
+        llm_provider_name="openrouter",
+        default_stt_model="whisper",
+        default_llm_model="gpt",
+        initial_settings={"pre_process_mode": "english", "input_source": "microphone"},
+    )
+
+    assert app.FEEDBACK_STEPS == [
+        ("compress", "Compressing Message"),
+        ("transcribe", "Transcribing Raw Message"),
+        ("post_process", "Post-Processing Message"),
+        ("summary", "Creating Summary"),
+    ]
+    assert app.feedback_state["compress"] == "pending"
+
+
+@pytest.mark.anyio
+async def test_refresh_feedback_renders_compress_stage():
+    prompt_manager = Mock()
+    prompt_manager.count_prompts.return_value = 0
+    prompt_manager.recent_prompts.return_value = []
+
+    app = AitranscribeTUI(
+        prompt_manager=prompt_manager,
+        process_audio=Mock(),
+        process_file=Mock(),
+        stt_provider_name="Groq",
+        llm_provider_name="openrouter",
+        default_stt_model="whisper",
+        default_llm_model="gpt",
+        initial_settings={"pre_process_mode": "english", "input_source": "microphone"},
+    )
+
+    async with app.run_test():
+        app.update_feedback_state("compress", "done")
+        feedback_text = app.query_one("#feedback_panel", Static).render()
+
+    assert "Compressing Message" in str(feedback_text)
+
+
+def test_update_transcript_from_worker_replaces_waiting_text():
+    prompt_manager = Mock()
+
+    app = AitranscribeTUI(
+        prompt_manager=prompt_manager,
+        process_audio=Mock(),
+        process_file=Mock(),
+        stt_provider_name="Groq",
+        llm_provider_name="openrouter",
+        default_stt_model="whisper",
+        default_llm_model="gpt",
+        initial_settings={"pre_process_mode": "english", "input_source": "microphone"},
+    )
+
+    with patch.object(app, "refresh_transcript") as mock_refresh:
+        app.latest_transcript = "Waiting for transcription..."
+        app.update_transcript_from_worker("Raw transcript")
+
+    assert app.raw_transcript == "Raw transcript"
+    assert app.latest_transcript == "Raw transcript"
+    mock_refresh.assert_called_once()
 
 
 @pytest.mark.anyio
@@ -297,6 +366,42 @@ async def test_refresh_history_prefers_summary_text_in_list_entries():
 
     assert "Short generated summary" in str(option_prompt)
     assert "Full transcript body" not in str(option_prompt)
+
+
+@pytest.mark.anyio
+async def test_refresh_history_uses_full_available_width_before_ellipsis():
+    prompt_manager = Mock()
+    prompt_manager.count_prompts.return_value = 1
+    prompt_manager.recent_prompts.return_value = [
+        {
+            "id": 7,
+            "prompt": "ignored full transcript body",
+            "filename": "a.mp3",
+            "timestamp": "2026-03-09T11:00:00",
+            "summary": "12345678901234567890",
+        },
+    ]
+
+    app = AitranscribeTUI(
+        prompt_manager=prompt_manager,
+        process_audio=Mock(),
+        process_file=Mock(),
+        stt_provider_name="Groq",
+        llm_provider_name="openrouter",
+        default_stt_model="whisper",
+        default_llm_model="gpt",
+        initial_settings={"pre_process_mode": "english", "input_source": "microphone"},
+    )
+
+    async with app.run_test():
+        history_list = app.query_one("#history_list", OptionList)
+        history_panel = app.query_one("#history_panel", Vertical)
+        history_list.styles.width = 30
+        history_panel.styles.width = 30
+        app.refresh_history()
+        option_prompt = str(history_list.get_option_at_index(0).prompt)
+
+    assert option_prompt == "#7: 12345678901234567890"
 
 
 @pytest.mark.anyio

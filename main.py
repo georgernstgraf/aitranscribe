@@ -615,7 +615,8 @@ def process_recorded_audio_for_tui(
     audio_np: np.ndarray,
     settings: dict[str, Any],
     feedback_callback: Callable[[str, str], None] | None = None,
-) -> dict[str, str]:
+    transcript_callback: Callable[[str], None] | None = None,
+) -> dict[str, Any]:
     prompt = get_pre_process_prompt(str(settings.get("pre_process_mode", "english")))
     verbose = bool(settings.get("verbose", False))
 
@@ -633,30 +634,36 @@ def process_recorded_audio_for_tui(
             feedback_callback(step_id, status)
 
     try:
+        update_feedback("compress", "active")
         compress_audio(raw_wav_file, output_path=final_mp3_file)
+        update_feedback("compress", "done")
         if os.path.exists(raw_wav_file):
             os.remove(raw_wav_file)
 
-        update_feedback("stt_send", "active")
+        update_feedback("transcribe", "active")
         assert stt_client is not None
         transcript = transcribe_audio(stt_client, final_mp3_file, str(settings.get("stt_model", GROQ_STT_MODEL)))
-        update_feedback("stt_send", "done")
-        update_feedback("stt_response", "done")
+        if transcript_callback:
+            transcript_callback(transcript)
+        update_feedback("transcribe", "done")
 
         final_text = transcript
         if prompt:
-            update_feedback("pre_send", "active")
+            update_feedback("post_process", "active")
             assert llm_client is not None
             final_text = process_with_llm(llm_client, transcript, prompt, str(settings.get("llm_model", LLM_MODEL)))
-            update_feedback("pre_send", "done")
-            update_feedback("pre_response", "done")
+            update_feedback("post_process", "done")
         else:
-            update_feedback("pre_send", "skipped")
-            update_feedback("pre_response", "skipped")
+            update_feedback("post_process", "done")
 
         prompt_id = prompt_manager.add_prompt(final_text, final_mp3_file)
 
-        return {"text": final_text, "file_path": final_mp3_file, "prompt_id": str(prompt_id) if prompt_id is not None else ""}
+        return {
+            "text": final_text,
+            "raw_text": transcript,
+            "file_path": final_mp3_file,
+            "prompt_id": str(prompt_id) if prompt_id is not None else "",
+        }
     finally:
         if os.path.exists(raw_wav_file):
             os.remove(raw_wav_file)
@@ -666,7 +673,8 @@ def process_file_for_tui(
     file_path: str,
     settings: dict[str, Any],
     feedback_callback: Callable[[str, str], None] | None = None,
-) -> dict[str, str]:
+    transcript_callback: Callable[[str], None] | None = None,
+) -> dict[str, Any]:
     prompt = get_pre_process_prompt(str(settings.get("pre_process_mode", "english")))
     verbose = bool(settings.get("verbose", False))
 
@@ -697,7 +705,8 @@ def process_file_for_tui(
             feedback_callback(step_id, status)
 
     try:
-        update_feedback("stt_send", "active")
+        update_feedback("compress", "done")
+        update_feedback("transcribe", "active")
         chunks = chunk_audio(file_for_processing)
         transcripts = []
         for chunk_path in chunks:
@@ -705,23 +714,24 @@ def process_file_for_tui(
             transcripts.append(transcribe_audio(stt_client, chunk_path, str(settings.get("stt_model", GROQ_STT_MODEL))))
             if chunk_path != file_for_processing:
                 os.remove(chunk_path)
-        update_feedback("stt_send", "done")
-        update_feedback("stt_response", "done")
+        raw_text = " ".join(text for text in transcripts if text).strip()
+        if transcript_callback:
+            transcript_callback(raw_text)
+        update_feedback("transcribe", "done")
 
-        final_text = " ".join(text for text in transcripts if text).strip()
+        final_text = raw_text
         if prompt:
-            update_feedback("pre_send", "active")
+            update_feedback("post_process", "active")
             assert llm_client is not None
             final_text = process_with_llm(llm_client, final_text, prompt, str(settings.get("llm_model", LLM_MODEL)))
-            update_feedback("pre_send", "done")
-            update_feedback("pre_response", "done")
+            update_feedback("post_process", "done")
         else:
-            update_feedback("pre_send", "skipped")
-            update_feedback("pre_response", "skipped")
+            update_feedback("post_process", "done")
 
         prompt_id = prompt_manager.add_prompt(final_text, file_for_processing)
         return {
             "text": final_text or "No transcript returned.",
+            "raw_text": raw_text,
             "file_path": file_for_processing,
             "prompt_id": str(prompt_id) if prompt_id is not None else "",
         }
