@@ -179,6 +179,31 @@ async def test_refresh_feedback_renders_compress_stage():
     assert "Compressing Message" in str(feedback_text)
 
 
+@pytest.mark.anyio
+async def test_refresh_feedback_preserves_summary_prefix_on_startup():
+    prompt_manager = Mock()
+    prompt_manager.count_prompts.return_value = 0
+    prompt_manager.recent_prompts.return_value = []
+
+    app = AitranscribeTUI(
+        prompt_manager=prompt_manager,
+        process_audio=Mock(),
+        process_file=Mock(),
+        stt_provider_name="Groq",
+        llm_provider_name="openrouter",
+        default_stt_model="whisper",
+        default_llm_model="gpt",
+        initial_settings={"pre_process_mode": "english", "input_source": "microphone"},
+    )
+
+    async with app.run_test() as pilot:
+        feedback_panel = app.query_one("#feedback_panel", Static)
+        await pilot.pause()
+        rendered = feedback_panel.render()
+
+    assert str(rendered).splitlines()[-1].startswith("[ ] Creating Summary")
+
+
 def test_update_transcript_from_worker_replaces_waiting_text():
     prompt_manager = Mock()
 

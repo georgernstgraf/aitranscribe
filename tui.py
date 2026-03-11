@@ -9,6 +9,7 @@ import textwrap
 from typing import Any, Callable, Mapping
 
 import numpy as np
+from rich.text import Text
 import sounddevice as sd
 from textual.app import App, ComposeResult
 from textual.binding import Binding
@@ -421,7 +422,7 @@ class AitranscribeTUI(App[None]):
                 "error": "[!]",
             }.get(state, "[ ]")
             lines.append(f"{prefix} {label}")
-        self.query_one("#feedback_panel", Static).update("\n".join(lines))
+        self.query_one("#feedback_panel", Static).update(Text("\n".join(lines), no_wrap=True, overflow="crop"))
 
     def refresh_history(self) -> None:
         count = self.prompt_manager.count_prompts()
