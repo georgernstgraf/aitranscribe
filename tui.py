@@ -142,17 +142,22 @@ class AitranscribeTUI(App[None]):
     #body {
         height: 1fr;
         padding: 0 1;
+        align: left top;
     }
 
     #primary {
         width: 4fr;
+        height: 1fr;
         margin: 0 1 0 0;
+        layout: vertical;
     }
 
     #sidebar {
         width: 3fr;
+        height: 1fr;
         min-width: 42;
         margin: 0;
+        layout: vertical;
     }
 
     .panel {
@@ -185,7 +190,8 @@ class AitranscribeTUI(App[None]):
     }
 
     #history_panel {
-        height: 11;
+        height: 1fr;
+        min-height: 11;
         margin-bottom: 1;
     }
 
@@ -205,6 +211,10 @@ class AitranscribeTUI(App[None]):
         height: auto;
     }
 
+    #extra_panel {
+        margin-top: 0;
+    }
+
     #config_panel {
         margin-bottom: 1;
     }
@@ -217,12 +227,14 @@ class AitranscribeTUI(App[None]):
     .field_row {
         height: 3;
         margin-bottom: 0;
+        align: center middle;
     }
 
     .field_row Label {
         width: 11;
         color: #a8dadc;
         content-align: left middle;
+        padding-top: 1;
     }
 
     .field_row Input {
@@ -343,6 +355,7 @@ class AitranscribeTUI(App[None]):
         self.refresh_transcript()
         self.refresh_feedback()
         self.refresh_history()
+        self.call_after_refresh(self.refresh_history)
         self._focus_initial_widget()
         if self.backfill_summaries is not None:
             self.run_worker(self.backfill_summaries_worker, thread=True, exclusive=False)

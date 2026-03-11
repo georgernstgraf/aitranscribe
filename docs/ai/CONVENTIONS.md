@@ -20,9 +20,10 @@ Follow these without question. Do not deviate unless explicitly told.
 - Use `Checkbox` for compact boolean settings in the sidebar instead of `Switch`, which rendered and behaved poorly in this layout.
 - Drive stored-transcription navigation with `OptionList`; the highlighted entry is the source of truth for transcript preview while the app is idle.
 - Keep the transcription list focused on mount so arrow keys work immediately when the app opens.
-- The `Transcriptions` pane should show the full stored history ordered newest-first, not a small recent slice.
+- The `Transcriptions` pane should show the full stored history ordered newest-first and expand to fill the sidebar height left over after `Recording Mode` and `Configuration` take their fixed space.
 - The `Transcriptions` pane should prefer stored `summary` text for list rows and fall back to shortened full transcript text only while a summary is still missing.
 - Compute history-row truncation from the live `OptionList` content width so startup layout does not add ellipses before the sidebar has reached its real size.
+- After the initial mount refresh, schedule one extra `refresh_history()` after the first layout pass so startup truncation uses the same width logic as later post-transcription refreshes.
 - Keep source selection and file-path entry inside the `Recording Mode` panel; microphone and filesystem transcription are two inputs to the same workflow.
 - Persist user-adjustable TUI choices directly to `CONFIG_FILE` instead of keeping them session-local.
 

@@ -56,3 +56,9 @@ Each entry documents WHAT was decided and WHY.
 - **Reason**: Users understand workflow progress better when the log reflects meaningful stages instead of internal request boundaries, and raw STT text can appear immediately after transcription completes.
 - **Considered**: Keeping the five-row low-level log, or only adding compression while leaving send/response rows intact.
 - **Tradeoff**: The feedback log is less granular about provider request boundaries, but much clearer about the actual processing pipeline.
+
+## 2026-03-11: Make Sidebar History Fill Remaining Height And Re-Refresh After Mount
+- **Choice**: Let the `Transcriptions` panel consume the remaining sidebar height with `height: 1fr` while `Recording Mode` and `Configuration` stay auto-sized, and trigger a second history refresh after the first layout pass on startup.
+- **Reason**: The right column should mirror the left column's behavior, and startup history previews need the same stable width calculation that later refreshes already use.
+- **Considered**: Tweaking only container heights, or relying on the initial mount refresh without a post-layout rerender.
+- **Tradeoff**: Startup performs one extra history-list rebuild, but the panel height and truncation become visually correct immediately.

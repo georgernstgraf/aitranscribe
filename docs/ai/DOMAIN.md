@@ -12,9 +12,11 @@ Business rules and domain relationships not obvious from code.
 - The `Transcriptions` pane is the primary browser for saved history and should expose the full database in reverse chronological order.
 - The `Transcriptions` pane should display stored summaries during scrolling instead of deriving previews from the first words of the full transcript whenever a summary exists.
 - Summary previews in the `Transcriptions` pane should use the full visible row width and only show an ellipsis when the current rendered line cannot fit the whole text.
+- The `Transcriptions` pane should occupy the remaining sidebar height above the fixed `Recording Mode` and `Configuration` boxes, mirroring how the left transcript pane fills the space between status and feedback.
 - Transcript output must remain mouse-selectable so users can copy text from the terminal and paste it into other applications.
 - The transcript panel doubles as a full-message preview for stored history: when the user highlights an entry with the arrow keys, that entry's complete text should replace the current idle transcript view.
 - The TUI must provide an explicit transcript-copy action because visual mouse selection in the fullscreen interface is not sufficient for cross-application paste.
 - The TUI `Recording Mode` panel must support both live microphone capture and filesystem audio-file transcription, with `english` as the default preprocessing mode.
 - Missing summaries should be backfilled only during TUI/default startup, and newly saved TUI transcriptions should get summaries asynchronously after the full transcript is already shown.
 - During live processing, the transcript pane should show raw transcription as soon as STT completes, then replace it with post-processed text once that stage finishes if post-processing is enabled.
+- Startup history previews should use the same truncation result as post-transcription refreshes; the app now achieves that by rebuilding the history list once more after the first layout pass.

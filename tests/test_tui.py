@@ -405,6 +405,38 @@ async def test_refresh_history_uses_full_available_width_before_ellipsis():
 
 
 @pytest.mark.anyio
+async def test_on_mount_schedules_second_history_refresh_after_layout():
+    prompt_manager = Mock()
+    prompt_manager.count_prompts.return_value = 1
+    prompt_manager.recent_prompts.return_value = [
+        {
+            "id": 7,
+            "prompt": "ignored transcript body",
+            "filename": "a.mp3",
+            "timestamp": "2026-03-09T11:00:00",
+            "summary": "Startup width should match post-transcription width",
+        },
+    ]
+
+    app = AitranscribeTUI(
+        prompt_manager=prompt_manager,
+        process_audio=Mock(),
+        process_file=Mock(),
+        stt_provider_name="Groq",
+        llm_provider_name="openrouter",
+        default_stt_model="whisper",
+        default_llm_model="gpt",
+        initial_settings={"pre_process_mode": "english", "input_source": "microphone"},
+    )
+
+    with patch.object(app, "refresh_history", wraps=app.refresh_history) as mock_refresh:
+        async with app.run_test():
+            pass
+
+    assert mock_refresh.call_count >= 2
+
+
+@pytest.mark.anyio
 async def test_processing_finished_starts_background_summary_generation_for_saved_prompt():
     prompt_manager = Mock()
     prompt_manager.count_prompts.return_value = 1
