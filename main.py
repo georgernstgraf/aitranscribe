@@ -28,11 +28,11 @@ PRE_PROCESS_MODES = {
         "prompt": None,
     },
     "cleanup": {
-        "label": "Clean up text",
+        "label": "Cleanup Text / Preserve Language",
         "prompt": "Please correct grammatical errors, remove filler words, and structure the following text.",
     },
     "english": {
-        "label": "Translate to English",
+        "label": "Cleanup + Translate to English",
         "prompt": "Please translate the following text to English, correct grammatical errors, remove filler words, and structure it clearly.",
     },
 }

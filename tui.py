@@ -333,8 +333,8 @@ class AitranscribeTUI(App[None]):
                         yield Input(value=str(self.initial_settings.get("file_path", "")), placeholder="/path/to/audio.mp3", id="file_path")
                     with RadioSet(id="preprocess_modes"):
                         yield RadioButton("Raw transcription", id="mode-raw", value=self.pre_process_mode == "raw")
-                        yield RadioButton("Clean up text", id="mode-cleanup", value=self.pre_process_mode == "cleanup")
-                        yield RadioButton("Translate to English", id="mode-english", value=self.pre_process_mode == "english")
+                        yield RadioButton("Cleanup Text / Preserve Language", id="mode-cleanup", value=self.pre_process_mode == "cleanup")
+                        yield RadioButton("Cleanup + Translate to English", id="mode-english", value=self.pre_process_mode == "english")
                 with Vertical(id="extra_panel", classes="panel"):
                     with Horizontal(classes="field_row"):
                         yield Label("STT-Model")

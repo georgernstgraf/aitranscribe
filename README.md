@@ -153,7 +153,7 @@ aitranscribe
 Inside the TUI you can:
 - switch between microphone recording and filesystem file transcription in `Recording Mode`
 - enter a file path in the `File` field and press `Enter` to transcribe it when `Filesystem file` is selected
-- switch the pre-processing mode between raw transcription, cleanup, and English translation
+- switch the pre-processing mode between `Raw transcription`, `Cleanup Text / Preserve Language`, and `Cleanup + Translate to English`
 - inspect a four-line feedback log for STT and pre-processing progress
 - configure models and extra settings in dedicated panels
 
@@ -162,7 +162,7 @@ Inside the TUI you can:
 aitranscribe --file path/to/audio.mp3
 ```
 
-**Translate to English directly:**
+**Cleanup + translate to English directly:**
 ```bash
 aitranscribe --file audio_in_other_language.mp3 --english
 ```
