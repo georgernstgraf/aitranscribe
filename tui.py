@@ -527,7 +527,7 @@ class AitranscribeTUI(App[None]):
             preview_source = summary_text or str(prompt["prompt"])
             prefix = f"#{prompt['id']}: "
             text_width = max(8, available_width - len(prefix))
-            shortened = textwrap.shorten(preview_source.replace("\n", " "), width=text_width, placeholder="...")
+            shortened = textwrap.shorten(preview_source.replace("\n", " "), width=text_width, placeholder=" ...")
             options.append(Option(f"#{prompt['id']}: {shortened}", id=f"history-{prompt['id']}"))
             if prompt["id"] == self.selected_history_id:
                 selected_index = index
