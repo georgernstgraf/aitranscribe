@@ -759,12 +759,16 @@ class AitranscribeTUI(App[None]):
                 break
 
         issue_path = "/tmp/issue.md"
+        file_existed = os.path.exists(issue_path)
         try:
             with open(issue_path, "w", encoding="utf-8") as f:
                 if summary:
                     f.write(f"# {summary}\n\n")
                 f.write(self.selected_history_text)
-            self.status_text = f"{issue_path} was (over-)written."
+            if file_existed:
+                self.status_text = f"{issue_path} was overwritten."
+            else:
+                self.status_text = f"{issue_path} was written."
         except OSError as e:
             self.status_text = f"Could not write {issue_path}: {e}"
         self.refresh_status()
