@@ -16,3 +16,5 @@ Read this file carefully before making changes in affected areas.
 - When using `gh issue create` or `gh issue comment` from Bash, do not put backticks inside a double-quoted `--body`; the shell will execute them unless you use a heredoc or otherwise escape them.
 - `OptionList.size.width` can be misleading on the initial TUI render; use live content-region widths with a fallback to avoid premature ellipses in history rows at startup.
 - The sidebar height bug was not caused by the outer sidebar container; the real fix is to make `#history_panel` itself `1fr` and leave `Recording Mode` and `Configuration` at fixed/auto heights.
+- Mouse-driven focus changes in the `Textual` TUI can leave the visible mode indicator stale unless focus-change events explicitly refresh the state field.
+- Do not use the editor contents as the append base for saved transcriptions; stale pane text can diverge from the selected DB entry even when persistence still targets the correct prompt id.

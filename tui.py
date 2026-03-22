@@ -15,6 +15,7 @@ from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
 from textual.events import Resize
+from textual.message import Message
 from textual.widgets import Footer, Header, Input, Label, OptionList, RadioButton, RadioSet, Static, TextArea
 from textual.widgets.option_list import Option
 
@@ -173,6 +174,19 @@ class AitranscribeTUI(App[None]):
         margin-bottom: 1;
     }
 
+    #status_row {
+        height: 1;
+    }
+
+    #state_status {
+        width: 1fr;
+    }
+
+    #flash_status {
+        width: 1fr;
+        color: #a8dadc;
+    }
+
     #transcript_panel {
         height: 1fr;
         min-height: 10;
@@ -247,7 +261,6 @@ class AitranscribeTUI(App[None]):
         Binding("space", "toggle_recording", "Record / Stop", priority=True),
         Binding("a", "append_recording", "Append Recording"),
         Binding("ctrl+s", "save_transcript", "Save Transcript"),
-        Binding("ctrl+shift+c", "copy_transcript", "Copy Transcript", priority=True),
         Binding("c", "copy_transcript", "Copy Transcript"),
         Binding("w", "write_issue", "Write Issue File"),
         Binding("delete", "delete_selected_transcription", "Delete Selected"),
@@ -317,12 +330,74 @@ class AitranscribeTUI(App[None]):
         self.append_mode: bool = False
         self.append_target_id: int | None = None
         self.append_base_text: str = ""
+        self.flash_message = ""
+
+    class FocusModeChanged(Message):
+        def __init__(self) -> None:
+            super().__init__()
+
+    def current_mode_label(self) -> str:
+        return "Pane Focus Mode" if self.is_pane_focus_mode() else "Command Mode"
+
+    def current_activity_label(self) -> str:
+        if self.is_recording:
+            if self.append_mode:
+                return "Appending"
+            return "Recording"
+        if self.is_processing:
+            if self.append_mode:
+                return "Appending"
+            if self.input_source == "file":
+                return "Processing File"
+            return "Processing Recording"
+        if self.input_source == "file":
+            return "Ready for File"
+        return "Ready"
+
+    def current_state_label(self) -> str:
+        mode_label = self.current_mode_label()
+        activity_label = self.current_activity_label()
+        if self.is_recording:
+            activity_label = f"{activity_label}: Press Space to Finish"
+        return f"{mode_label} | {activity_label}"
+
+    def set_flash_message(self, message: str) -> None:
+        self.flash_message = message
+
+    def clear_flash_message(self) -> None:
+        self.flash_message = ""
+
+    def refresh_flash(self) -> None:
+        self.query_one("#flash_status", Static).update(self.flash_message)
+
+    def refresh_state(self) -> None:
+        self.query_one("#state_status", Static).update(self.current_state_label())
+
+    def refresh_status_panel(self) -> None:
+        self.refresh_state()
+        self.refresh_flash()
+
+    def set_status_message(self, message: str) -> None:
+        self.status_text = message
+        self.set_flash_message(message)
+
+    def set_idle_status(self) -> None:
+        self.status_text = "Press Space to Start Recording" if self.input_source == "microphone" else "Press Enter on File to Transcribe"
+
+    def set_processing_status(self) -> None:
+        self.status_text = "Processing recording..." if self.input_source == "microphone" else "Processing file..."
+
+    def start_operation_feedback(self) -> None:
+        self.clear_flash_message()
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True)
         with Horizontal(id="body"):
             with Vertical(id="primary"):
-                yield Static(id="status_panel", classes="panel")
+                with Vertical(id="status_panel", classes="panel"):
+                    with Horizontal(id="status_row"):
+                        yield Static(id="state_status")
+                        yield Static(id="flash_status")
                 with Vertical(id="transcript_panel", classes="panel"):
                     yield TextArea("No transcript yet.", id="transcript_editor")
                 yield Static(id="feedback_panel", classes="panel")
@@ -351,7 +426,7 @@ class AitranscribeTUI(App[None]):
         yield Footer()
 
     def on_mount(self) -> None:
-        self.query_one("#status_panel", Static).border_title = "Status"
+        self.query_one("#status_panel", Vertical).border_title = "Status"
         self.query_one("#transcript_panel", Vertical).border_title = "Transcript (editable, Ctrl+S to save)"
         self.query_one("#feedback_panel", Static).border_title = "Feedback Log"
         self.query_one("#history_panel", Vertical).border_title = "Transcriptions"
@@ -367,13 +442,7 @@ class AitranscribeTUI(App[None]):
             self.run_worker(self.backfill_summaries_worker, thread=True, exclusive=False)
 
     def refresh_status(self) -> None:
-        mode_label = "Pane Focus Mode" if self.is_pane_focus_mode() else "Command Mode"
-        if self.is_pane_focus_mode():
-            hint = "Esc=command mode | Tab=navigate | Ctrl+S=save | Ctrl+Shift+C=copy"
-        else:
-            action = "Space=record" if self.input_source == "microphone" else "Enter on File=transcribe"
-            hint = f"{action} | A=append | W=write issue | Del=list delete | Ctrl+S=save | Ctrl+Shift+C=copy | Tab=navigate | Q=quit"
-        self.query_one("#status_panel", Static).update(f"Mode: {mode_label}\n{self.status_text}\n{hint}")
+        self.refresh_status_panel()
 
     def _focus_initial_widget(self) -> None:
         if self.input_source == "file":
@@ -507,8 +576,25 @@ class AitranscribeTUI(App[None]):
     def action_enter_command_mode(self) -> None:
         self.screen.set_focus(None)
         if not self.is_recording and not self.is_processing:
-            self.status_text = "Press Space to Start Recording" if self.input_source == "microphone" else "Press Enter on File to Transcribe"
+            self.set_idle_status()
+        self.refresh_status()
+
+    def watch_focus(self, old_focus: Any, new_focus: Any) -> None:
+        del old_focus, new_focus
+        if self.is_mounted:
+            self.post_message(self.FocusModeChanged())
+
+    def on_descendant_focus(self) -> None:
+        if self.is_mounted:
             self.refresh_status()
+
+    def on_descendant_blur(self) -> None:
+        if self.is_mounted:
+            self.refresh_status()
+
+    def on_aitranscribe_tui_focus_mode_changed(self, event: FocusModeChanged) -> None:
+        del event
+        self.refresh_status()
 
     def action_toggle_recording(self) -> None:
         if self.is_processing:
@@ -537,12 +623,13 @@ class AitranscribeTUI(App[None]):
 
         if self.selected_history_id is None or self.selected_history_text is None:
             self.cancel_append_mode()
-            self.status_text = "Select a saved transcription before appending."
+            self.set_status_message("Select a saved transcription before appending.")
             self.refresh_status()
             return
 
         self.append_target_id = self.selected_history_id
-        self.append_base_text = self.get_editor_text().strip()
+        self.append_base_text = self.selected_history_text
+        self.latest_transcript = self.append_base_text
         self.append_mode = True
         self.start_recording()
 
@@ -550,7 +637,7 @@ class AitranscribeTUI(App[None]):
         try:
             self.recorder.start()
         except Exception as exc:
-            self.status_text = f"Could not start recording: {exc}"
+            self.set_status_message(f"Could not start recording: {exc}")
             self.refresh_status()
             return
 
@@ -559,9 +646,11 @@ class AitranscribeTUI(App[None]):
             self.clear_history_selection()
         self.latest_file_path = None
         self.raw_transcript = None
-        if not self.append_mode:
+        if self.append_mode and self.append_base_text:
+            self.latest_transcript = self.append_base_text
+        elif not self.append_mode:
             self.latest_transcript = "Recording in progress..."
-        self.status_text = "Press Space again to Finish"
+        self.start_operation_feedback()
         self.reset_feedback()
         self.refresh_status()
         self.refresh_transcript()
@@ -573,14 +662,15 @@ class AitranscribeTUI(App[None]):
             self.cancel_append_mode()
             self.latest_transcript = "No audio recorded."
             self.latest_file_path = None
-            self.status_text = "Press Space to Start Recording"
+            self.set_status_message("No audio recorded.")
             self.refresh_transcript()
             self.refresh_status()
             return
 
         self.is_processing = True
         self.raw_transcript = None
-        self.status_text = "Processing recording..."
+        self.start_operation_feedback()
+        self.set_processing_status()
         self.latest_transcript = "Waiting for transcription..."
         self.refresh_status()
         self.refresh_transcript()
@@ -590,7 +680,7 @@ class AitranscribeTUI(App[None]):
     def start_file_transcription(self) -> None:
         file_path = self.query_one("#file_path", Input).value.strip()
         if not file_path:
-            self.status_text = "Enter an audio file path first."
+            self.set_status_message("Enter an audio file path first.")
             self.refresh_status()
             return
 
@@ -599,7 +689,8 @@ class AitranscribeTUI(App[None]):
         self.raw_transcript = None
         self.latest_transcript = f"Transcribing file: {file_path}"
         self.latest_file_path = file_path
-        self.status_text = "Processing file..."
+        self.start_operation_feedback()
+        self.set_processing_status()
         self.reset_feedback()
         self.refresh_status()
         self.refresh_transcript()
@@ -676,7 +767,7 @@ class AitranscribeTUI(App[None]):
         self.raw_transcript = None
         self.latest_file_path = None
         retry_hint = "Press Space to try again." if self.input_source == "microphone" else "Press Enter on File to try again."
-        self.status_text = f"Processing failed. {retry_hint}"
+        self.set_status_message(f"Processing failed. {retry_hint}")
         self.refresh_feedback()
         self.refresh_transcript()
         self.refresh_status()
@@ -699,7 +790,7 @@ class AitranscribeTUI(App[None]):
         self.latest_transcript = text
         self.raw_transcript = result.get("raw_text") or self.raw_transcript
         self.latest_file_path = result.get("file_path")
-        self.status_text = "Press Space to Start Recording" if self.input_source == "microphone" else "File transcription finished. Press Enter on File to run again."
+        self.set_idle_status()
         self.refresh_transcript()
         self.refresh_status()
         self.refresh_history()
@@ -741,7 +832,7 @@ class AitranscribeTUI(App[None]):
     def action_save_transcript(self) -> None:
         text = self.get_editor_text().strip()
         if not text or text in {"No transcript yet.", "Recording in progress...", "Waiting for transcription..."}:
-            self.status_text = "No finished transcript to save yet."
+            self.set_status_message("No finished transcript to save yet.")
             self.refresh_status()
             return
 
@@ -752,17 +843,17 @@ class AitranscribeTUI(App[None]):
                 self.latest_transcript = text
                 self.refresh_history()
                 self.action_enter_command_mode()
-                self.status_text = f"Saved transcription #{self.selected_history_id}."
+                self.set_status_message(f"Saved transcription #{self.selected_history_id}.")
                 self.refresh_status()
             else:
-                self.status_text = f"Could not save transcription #{self.selected_history_id}."
+                self.set_status_message(f"Could not save transcription #{self.selected_history_id}.")
                 self.refresh_status()
             return
 
         filename = self.latest_file_path or self.query_one("#file_path", Input).value.strip() or "manual-entry"
         prompt_id = self.prompt_manager.add_prompt(text, filename)
         if prompt_id is None:
-            self.status_text = "Could not save transcription."
+            self.set_status_message("Could not save transcription.")
             self.refresh_status()
         else:
             self.selected_history_id = prompt_id
@@ -771,7 +862,7 @@ class AitranscribeTUI(App[None]):
             self.latest_transcript = text
             self.refresh_history()
             self.action_enter_command_mode()
-            self.status_text = f"Saved transcription #{prompt_id}."
+            self.set_status_message(f"Saved transcription #{prompt_id}.")
             self.refresh_status()
 
     def action_delete_selected_transcription(self) -> None:
@@ -779,7 +870,7 @@ class AitranscribeTUI(App[None]):
         if focused is None or focused.id != "history_list":
             return
         if self.selected_history_id is None:
-            self.status_text = "No transcription selected to delete."
+            self.set_status_message("No transcription selected to delete.")
             self.refresh_status()
             return
 
@@ -788,25 +879,25 @@ class AitranscribeTUI(App[None]):
         if deleted:
             self.latest_transcript = "No transcript yet."
             self.clear_history_selection()
-            self.status_text = f"Deleted transcription #{deleted_id}."
+            self.set_status_message(f"Deleted transcription #{deleted_id}.")
             self.refresh_history()
         else:
-            self.status_text = f"Could not delete transcription #{deleted_id}."
+            self.set_status_message(f"Could not delete transcription #{deleted_id}.")
         self.refresh_status()
 
     def action_copy_transcript(self) -> None:
         text = self.get_editor_text().strip()
         if not text or text in {"No transcript yet.", "Recording in progress...", "Waiting for transcription..."}:
-            self.status_text = "No finished transcript to copy yet."
+            self.set_status_message("No finished transcript to copy yet.")
         elif copy_text_to_clipboard(text):
-            self.status_text = "Copied transcript to clipboard."
+            self.set_status_message("Copied transcript to clipboard.")
         else:
-            self.status_text = "Clipboard copy unavailable in this session."
+            self.set_status_message("Clipboard copy unavailable in this session.")
         self.refresh_status()
 
     def action_write_issue(self) -> None:
         if self.selected_history_id is None or self.selected_history_text is None:
-            self.status_text = "No transcription selected to write."
+            self.set_status_message("No transcription selected to write.")
             self.refresh_status()
             return
 
@@ -824,11 +915,11 @@ class AitranscribeTUI(App[None]):
                     f.write(f"# {summary}\n\n")
                 f.write(self.selected_history_text)
             if file_existed:
-                self.status_text = f"{issue_path} was overwritten."
+                self.set_status_message(f"{issue_path} was overwritten.")
             else:
-                self.status_text = f"{issue_path} was written."
+                self.set_status_message(f"{issue_path} was written.")
         except OSError as e:
-            self.status_text = f"Could not write {issue_path}: {e}"
+            self.set_status_message(f"Could not write {issue_path}: {e}")
         self.refresh_status()
 
     def on_option_list_option_highlighted(self, event: OptionList.OptionHighlighted) -> None:
@@ -843,7 +934,7 @@ class AitranscribeTUI(App[None]):
         if event.radio_set.id == "source_modes" and event.pressed.id:
             self.input_source = event.pressed.id.removeprefix("source-")
             self.persist_setting_value("input_source", self.input_source)
-            self.status_text = "Press Space to Start Recording" if self.input_source == "microphone" else "Press Enter on File to Transcribe"
+            self.set_idle_status()
             if self.input_source == "file":
                 self.set_focus(self.query_one("#file_path", Input))
             self.refresh_status()

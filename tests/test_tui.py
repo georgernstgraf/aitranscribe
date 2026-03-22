@@ -239,10 +239,11 @@ async def test_refresh_status_shows_command_mode_hint():
 
     async with app.run_test():
         app.action_enter_command_mode()
-        status_text = str(app.query_one("#status_panel", Static).render())
+        state_text = str(app.query_one("#state_status", Static).render())
+        flash_text = str(app.query_one("#flash_status", Static).render())
 
-    assert "Mode: Command Mode" in status_text
-    assert "W=write issue" in status_text
+    assert state_text == "Command Mode | Ready"
+    assert flash_text == ""
 
 
 @pytest.mark.anyio
@@ -268,10 +269,190 @@ async def test_refresh_status_shows_pane_focus_mode_hint():
         history_list = app.query_one("#history_list", OptionList)
         app.set_focus(history_list)
         app.refresh_status()
-        status_text = str(app.query_one("#status_panel", Static).render())
+        state_text = str(app.query_one("#state_status", Static).render())
 
-    assert "Mode: Pane Focus Mode" in status_text
-    assert "Esc=command mode" in status_text
+    assert state_text == "Pane Focus Mode | Ready"
+
+
+@pytest.mark.anyio
+async def test_click_focus_updates_status_to_pane_focus_mode():
+    prompt_manager = Mock()
+    prompt_manager.count_prompts.return_value = 1
+    prompt_manager.recent_prompts.return_value = [
+        {"id": 7, "prompt": "Stored transcript", "filename": "a.mp3", "timestamp": "2026-03-09T11:00:00", "summary": None},
+    ]
+
+    app = AitranscribeTUI(
+        prompt_manager=prompt_manager,
+        process_audio=Mock(),
+        process_file=Mock(),
+        stt_provider_name="Groq",
+        llm_provider_name="openrouter",
+        default_stt_model="whisper",
+        default_llm_model="gpt",
+        initial_settings={"pre_process_mode": "english", "input_source": "microphone"},
+    )
+
+    async with app.run_test() as pilot:
+        editor = app.query_one("#transcript_editor", TextArea)
+        app.action_enter_command_mode()
+        await pilot.pause()
+        app.set_focus(editor)
+        await pilot.pause()
+        state_text = str(app.query_one("#state_status", Static).render())
+
+    assert state_text == "Pane Focus Mode | Ready"
+
+
+@pytest.mark.anyio
+async def test_recording_status_overrides_command_mode_idle_message():
+    prompt_manager = Mock()
+    prompt_manager.count_prompts.return_value = 0
+    prompt_manager.recent_prompts.return_value = []
+
+    app = AitranscribeTUI(
+        prompt_manager=prompt_manager,
+        process_audio=Mock(),
+        process_file=Mock(),
+        stt_provider_name="Groq",
+        llm_provider_name="openrouter",
+        default_stt_model="whisper",
+        default_llm_model="gpt",
+        initial_settings={"pre_process_mode": "english", "input_source": "microphone"},
+    )
+    app.is_recording = True
+    app.append_mode = False
+    app.status_text = "Press Space to Start Recording"
+
+    async with app.run_test():
+        app.refresh_status()
+        state_text = str(app.query_one("#state_status", Static).render())
+
+    assert state_text == "Pane Focus Mode | Recording: Press Space to Finish"
+
+
+@pytest.mark.anyio
+async def test_append_processing_status_stays_visible_in_pane_focus_mode():
+    prompt_manager = Mock()
+    prompt_manager.count_prompts.return_value = 1
+    prompt_manager.recent_prompts.return_value = [
+        {"id": 7, "prompt": "Stored transcript", "filename": "a.mp3", "timestamp": "2026-03-09T11:00:00", "summary": None},
+    ]
+
+    app = AitranscribeTUI(
+        prompt_manager=prompt_manager,
+        process_audio=Mock(),
+        process_file=Mock(),
+        stt_provider_name="Groq",
+        llm_provider_name="openrouter",
+        default_stt_model="whisper",
+        default_llm_model="gpt",
+        initial_settings={"pre_process_mode": "english", "input_source": "microphone"},
+    )
+    app.is_processing = True
+    app.append_mode = True
+    app.status_text = "Saved transcription #7."
+
+    async with app.run_test() as pilot:
+        editor = app.query_one("#transcript_editor", TextArea)
+        app.set_focus(editor)
+        await pilot.pause()
+        state_text = str(app.query_one("#state_status", Static).render())
+
+    assert state_text == "Pane Focus Mode | Appending"
+
+
+@pytest.mark.anyio
+async def test_save_feedback_remains_visible_after_returning_to_command_mode():
+    prompt_manager = Mock()
+    prompt_manager.count_prompts.return_value = 1
+    prompt_manager.recent_prompts.return_value = [
+        {"id": 7, "prompt": "Stored transcript", "filename": "a.mp3", "timestamp": "2026-03-09T11:00:00", "summary": None},
+    ]
+    prompt_manager.update_prompt.return_value = True
+
+    app = AitranscribeTUI(
+        prompt_manager=prompt_manager,
+        process_audio=Mock(),
+        process_file=Mock(),
+        stt_provider_name="Groq",
+        llm_provider_name="openrouter",
+        default_stt_model="whisper",
+        default_llm_model="gpt",
+        initial_settings={"pre_process_mode": "english", "input_source": "microphone"},
+    )
+
+    async with app.run_test() as pilot:
+        editor = app.query_one("#transcript_editor", TextArea)
+        editor.text = "Edited transcript"
+        app.set_focus(editor)
+        await pilot.pause()
+        app.action_save_transcript()
+        await pilot.pause()
+        state_text = str(app.query_one("#state_status", Static).render())
+        flash_text = str(app.query_one("#flash_status", Static).render())
+
+    assert state_text == "Command Mode | Ready"
+    assert flash_text == "Saved transcription #7."
+
+
+@pytest.mark.anyio
+async def test_copy_feedback_uses_flash_status_field():
+    prompt_manager = Mock()
+    prompt_manager.count_prompts.return_value = 0
+    prompt_manager.recent_prompts.return_value = []
+
+    app = AitranscribeTUI(
+        prompt_manager=prompt_manager,
+        process_audio=Mock(),
+        process_file=Mock(),
+        stt_provider_name="Groq",
+        llm_provider_name="openrouter",
+        default_stt_model="whisper",
+        default_llm_model="gpt",
+        initial_settings={"pre_process_mode": "english", "input_source": "microphone"},
+    )
+
+    with patch("tui.copy_text_to_clipboard", return_value=True):
+        async with app.run_test():
+            editor = app.query_one("#transcript_editor", TextArea)
+            editor.text = "Copied text"
+            app.action_copy_transcript()
+            flash_text = str(app.query_one("#flash_status", Static).render())
+
+    assert flash_text == "Copied transcript to clipboard."
+
+
+@pytest.mark.anyio
+async def test_write_issue_feedback_uses_flash_status_field():
+    prompt_manager = Mock()
+    prompt_manager.count_prompts.return_value = 1
+    prompt_manager.recent_prompts.return_value = [
+        {"id": 7, "prompt": "Stored transcript", "filename": "a.mp3", "timestamp": "2026-03-09T11:00:00", "summary": "Issue title"},
+    ]
+
+    app = AitranscribeTUI(
+        prompt_manager=prompt_manager,
+        process_audio=Mock(),
+        process_file=Mock(),
+        stt_provider_name="Groq",
+        llm_provider_name="openrouter",
+        default_stt_model="whisper",
+        default_llm_model="gpt",
+        initial_settings={"pre_process_mode": "english", "input_source": "microphone"},
+    )
+    app.selected_history_id = 7
+    app.selected_history_text = "Stored transcript"
+    app.history_prompts = prompt_manager.recent_prompts.return_value
+
+    with patch("tui.os.path.exists", return_value=False):
+        with patch("builtins.open", create=True) as mock_open:
+            async with app.run_test():
+                app.action_write_issue()
+                flash_text = str(app.query_one("#flash_status", Static).render())
+
+    assert flash_text == "/tmp/issue.md was written."
+    assert mock_open.called
 
 
 @pytest.mark.anyio
@@ -462,7 +643,33 @@ def test_action_append_recording_uses_selected_saved_transcript_as_base():
     assert app.append_mode is True
     assert app.append_target_id == 42
     assert app.append_base_text == "This is a historical transcript from the history list."
+    assert app.latest_transcript == "This is a historical transcript from the history list."
     mock_start.assert_called_once()
+
+
+def test_start_recording_preserves_append_base_text_in_editor_state():
+    prompt_manager = Mock()
+
+    app = AitranscribeTUI(
+        prompt_manager=prompt_manager,
+        process_audio=Mock(),
+        process_file=Mock(),
+        stt_provider_name="Groq",
+        llm_provider_name="openrouter",
+        default_stt_model="whisper",
+        default_llm_model="gpt",
+        initial_settings={"pre_process_mode": "english", "input_source": "microphone"},
+    )
+    app.append_mode = True
+    app.append_base_text = "Previously stored transcript"
+
+    with patch.object(app.recorder, "start"):
+        with patch.object(app, "reset_feedback"):
+            with patch.object(app, "refresh_status"):
+                with patch.object(app, "refresh_transcript"):
+                    app.start_recording()
+
+    assert app.latest_transcript == "Previously stored transcript"
 
 
 @pytest.mark.anyio
@@ -572,7 +779,7 @@ async def test_delete_selected_transcription_uses_delete_key_on_history_list():
 
 
 @pytest.mark.anyio
-async def test_ctrl_shift_c_copies_full_editor_text_while_editing():
+async def test_copy_action_copies_full_editor_text_while_editing():
     prompt_manager = Mock()
     prompt_manager.count_prompts.return_value = 0
     prompt_manager.recent_prompts.return_value = []
@@ -587,13 +794,15 @@ async def test_ctrl_shift_c_copies_full_editor_text_while_editing():
         default_llm_model="gpt",
         initial_settings={"pre_process_mode": "english", "input_source": "microphone"},
     )
+    app.latest_transcript = "Edited transcript\nSecond line"
 
     with patch("tui.copy_text_to_clipboard", return_value=True) as mock_copy:
         async with app.run_test() as pilot:
             editor = app.query_one("#transcript_editor", TextArea)
             app.set_focus(editor)
             editor.text = "Edited transcript\nSecond line"
-            await pilot.press("ctrl+shift+c")
+            await pilot.pause()
+            app.action_copy_transcript()
 
     mock_copy.assert_called_with("Edited transcript\nSecond line")
 

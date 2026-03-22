@@ -3,13 +3,18 @@
 Current status as of 2026-03-22.
 
 ## Current Focus
-Improving TUI workflow ergonomics based on user feedback.
+TUI workflow ergonomics are improved; remaining work is manual real-terminal validation and any follow-up polish that emerges from it.
 
 ## Completed (this cycle)
 - [x] Add 'a' key to append transcriptions (Space=new, 'a'=append).
 - [x] Fix 'w' hotkey feedback to distinguish overwritten vs new file.
 - [x] Fix save confirmation message visibility after Ctrl+S.
 - [x] Name the TUI focus states explicitly as `Command Mode` and `Pane Focus Mode`.
+- [x] Split the status area into separate state and flash-feedback fields.
+- [x] Restore visible save/copy/write/delete confirmations in the TUI flash field.
+- [x] Remove the redundant `Ctrl+Shift+C` copy binding and keep `C` as the copy hotkey.
+- [x] Make append mode use the selected saved transcription as the source of truth for both rendering and persistence.
+- [x] Keep the existing transcript visible immediately after pressing `A` to append.
 
 ## Previously Completed
 - [x] Renamed the `english` Recording Mode option to `Cleanup + Translate to English` in the shared preprocessing-mode mapping and the TUI radio buttons.
@@ -28,4 +33,4 @@ Improving TUI workflow ergonomics based on user feedback.
 - None
 
 ## Next Session Suggestion
-Start with a real-terminal TUI launch to confirm the renamed preprocessing labels read well in the sidebar, then continue the remaining manual validation passes.
+Start with a real-terminal TUI launch to validate the refined modal state/flash feedback behavior and append workflow with real mouse and microphone interaction, then continue the remaining manual validation passes.

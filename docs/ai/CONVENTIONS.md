@@ -27,6 +27,8 @@ Follow these without question. Do not deviate unless explicitly told.
 - After the initial mount refresh, schedule one extra `refresh_history()` after the first layout pass so startup truncation uses the same width logic as later post-transcription refreshes.
 - Keep source selection and file-path entry inside the `Recording Mode` panel; microphone and filesystem transcription are two inputs to the same workflow.
 - Persist user-adjustable TUI choices directly to `CONFIG_FILE` instead of keeping them session-local.
+- Keep TUI mode state and user feedback separate: the left status field shows derived `Command Mode` / `Pane Focus Mode` plus activity, and the right flash field shows the latest action confirmation or error.
+- In append mode, use the selected saved transcription as the render and persistence source of truth instead of transient editor text.
 
 ## Testing
 - Cover TUI integration points from the CLI layer with focused unit tests instead of trying to run an interactive terminal session in `pytest`.

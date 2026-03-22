@@ -93,6 +93,24 @@ Each entry documents WHAT was decided and WHY.
 - **Considered**: Keeping focus on the editor after save so users can continue editing.
 - **Tradeoff**: Users who want to edit more after saving must press Tab to re-enter the editor instead of just continuing to type. The save-then-copy workflow is more common than save-then-edit-more.
 
+## 2026-03-22: Split TUI Status Into State And Flash Fields
+- **Choice**: Replace the overloaded single status area with two one-line fields: a persistent `State` field and a persistent `Flash` feedback field.
+- **Reason**: Mode changes, recording state, and action confirmations were overwriting each other and causing inconsistent user feedback, especially after mouse focus changes.
+- **Considered**: Keeping one status field with more complex priority rules, or using timed disappearing notifications.
+- **Tradeoff**: The UI adds one more explicit field, but status semantics become much simpler and feedback messages remain visible until replaced.
+
+## 2026-03-22: Remove Redundant Ctrl+Shift+C Copy Binding
+- **Choice**: Keep `C` as the transcript copy hotkey and remove the duplicate `Ctrl+Shift+C` binding.
+- **Reason**: The duplicate binding was unnecessary once explicit copy feedback was restored through the new flash-message field.
+- **Considered**: Keeping both bindings for compatibility.
+- **Tradeoff**: Users accustomed to `Ctrl+Shift+C` must switch to `C`, but the binding surface is simpler and less confusing.
+
+## 2026-03-22: Append Renders From Selected Saved Transcript
+- **Choice**: In append mode, derive the display and append base text from the selected saved transcript entry rather than the transient editor contents.
+- **Reason**: Mouse/focus interactions could leave stale editor text visible, causing append to target the correct DB row while temporarily rendering the wrong transcript in the pane.
+- **Considered**: Continuing to use editor text as the append base, or trying to synchronize editor text more aggressively.
+- **Tradeoff**: Append now depends on a saved selection being present, but the rendered transcript and persisted transcript always use the same source of truth.
+
 ## 2026-03-11: Make Sidebar History Fill Remaining Height And Re-Refresh After Mount
 - **Choice**: Let the `Transcriptions` panel consume the remaining sidebar height with `height: 1fr` while `Recording Mode` and `Configuration` stay auto-sized, and trigger a second history refresh after the first layout pass on startup.
 - **Reason**: The right column should mirror the left column's behavior, and startup history previews need the same stable width calculation that later refreshes already use.
