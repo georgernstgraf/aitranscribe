@@ -692,27 +692,29 @@ class AitranscribeTUI(App[None]):
             if saved:
                 self.selected_history_text = text
                 self.latest_transcript = text
-                self.status_text = f"Saved transcription #{self.selected_history_id}."
                 self.refresh_history()
                 self.action_focus_recorder()
+                self.status_text = f"Saved transcription #{self.selected_history_id}."
+                self.refresh_status()
             else:
                 self.status_text = f"Could not save transcription #{self.selected_history_id}."
-            self.refresh_status()
+                self.refresh_status()
             return
 
         filename = self.latest_file_path or self.query_one("#file_path", Input).value.strip() or "manual-entry"
         prompt_id = self.prompt_manager.add_prompt(text, filename)
         if prompt_id is None:
             self.status_text = "Could not save transcription."
+            self.refresh_status()
         else:
             self.selected_history_id = prompt_id
             self.selected_history_text = text
             self.selected_history_filename = filename
             self.latest_transcript = text
-            self.status_text = f"Saved transcription #{prompt_id}."
             self.refresh_history()
             self.action_focus_recorder()
-        self.refresh_status()
+            self.status_text = f"Saved transcription #{prompt_id}."
+            self.refresh_status()
 
     def action_delete_selected_transcription(self) -> None:
         focused = self.focused
