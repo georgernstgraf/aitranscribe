@@ -57,6 +57,12 @@ Each entry documents WHAT was decided and WHY.
 - **Considered**: Keeping the five-row low-level log, or only adding compression while leaving send/response rows intact.
 - **Tradeoff**: The feedback log is less granular about provider request boundaries, but much clearer about the actual processing pipeline.
 
+## 2026-03-22: Add 'a' Key to Append Transcriptions
+- **Choice**: Space starts new transcription, 'a' appends to existing text.
+- **Reason**: Allows speakers to take breaks without including pauses in speech-to-text.
+- **Considered**: Always appending, requiring manual clear.
+- **Tradeoff**: Users must remember 'a' for append vs Space for new.
+
 ## 2026-03-22: Distinguish Overwritten vs New File for 'w' Hotkey
 - **Choice**: Check file existence before writing and show distinct messages.
 - **Reason**: Users need clear feedback whether a file was created new or overwritten.

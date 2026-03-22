@@ -6,10 +6,9 @@ Current status as of 2026-03-22.
 Improving TUI workflow ergonomics based on user feedback.
 
 ## Completed (this cycle)
-- [x] Fixed save confirmation message visibility after Ctrl+S (status set after focus change).
-- [x] Added 'w' hotkey to write selected prompt to /tmp/issue.md.
-- [x] Added automatic return to command mode after Ctrl+S save in TUI.
-- [x] Fixed OSC52 clipboard test to skip without terminal environment.
+- [x] Add 'a' key to append transcriptions (Space=new, 'a'=append).
+- [x] Fix 'w' hotkey feedback to distinguish overwritten vs new file.
+- [x] Fix save confirmation message visibility after Ctrl+S.
 
 ## Previously Completed
 - [x] Renamed the `english` Recording Mode option to `Cleanup + Translate to English` in the shared preprocessing-mode mapping and the TUI radio buttons.
