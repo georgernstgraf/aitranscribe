@@ -693,6 +693,7 @@ class AitranscribeTUI(App[None]):
                 self.latest_transcript = text
                 self.status_text = f"Saved transcription #{self.selected_history_id}."
                 self.refresh_history()
+                self.action_focus_recorder()
             else:
                 self.status_text = f"Could not save transcription #{self.selected_history_id}."
             self.refresh_status()
@@ -709,6 +710,7 @@ class AitranscribeTUI(App[None]):
             self.latest_transcript = text
             self.status_text = f"Saved transcription #{prompt_id}."
             self.refresh_history()
+            self.action_focus_recorder()
         self.refresh_status()
 
     def action_delete_selected_transcription(self) -> None:
