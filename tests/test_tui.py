@@ -233,6 +233,55 @@ def test_update_transcript_from_worker_replaces_waiting_text():
     mock_refresh.assert_called_once()
 
 
+def test_update_transcript_from_worker_appends_in_append_mode():
+    prompt_manager = Mock()
+
+    app = AitranscribeTUI(
+        prompt_manager=prompt_manager,
+        process_audio=Mock(),
+        process_file=Mock(),
+        stt_provider_name="Groq",
+        llm_provider_name="openrouter",
+        default_stt_model="whisper",
+        default_llm_model="gpt",
+        initial_settings={"pre_process_mode": "english", "input_source": "microphone"},
+    )
+
+    app.append_mode = True
+    app.latest_transcript = "First transcript"
+
+    with patch.object(app, "refresh_transcript") as mock_refresh:
+        app.update_transcript_from_worker("Second transcript")
+
+    assert app.raw_transcript == "Second transcript"
+    assert app.latest_transcript == "First transcript\n\nSecond transcript"
+    mock_refresh.assert_called_once()
+
+
+def test_update_transcript_from_worker_append_ignores_placeholder():
+    prompt_manager = Mock()
+
+    app = AitranscribeTUI(
+        prompt_manager=prompt_manager,
+        process_audio=Mock(),
+        process_file=Mock(),
+        stt_provider_name="Groq",
+        llm_provider_name="openrouter",
+        default_stt_model="whisper",
+        default_llm_model="gpt",
+        initial_settings={"pre_process_mode": "english", "input_source": "microphone"},
+    )
+
+    for placeholder in ["No transcript yet.", "Recording in progress...", "Waiting for transcription..."]:
+        app.append_mode = True
+        app.latest_transcript = placeholder
+
+        with patch.object(app, "refresh_transcript") as mock_refresh:
+            app.update_transcript_from_worker("New transcript")
+
+        assert app.latest_transcript == "New transcript", f"Failed for placeholder: {placeholder}"
+
+
 @pytest.mark.anyio
 async def test_refresh_history_requests_full_history_list():
     prompt_manager = Mock()
