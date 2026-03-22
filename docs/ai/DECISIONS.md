@@ -57,6 +57,12 @@ Each entry documents WHAT was decided and WHY.
 - **Considered**: Keeping the five-row low-level log, or only adding compression while leaving send/response rows intact.
 - **Tradeoff**: The feedback log is less granular about provider request boundaries, but much clearer about the actual processing pipeline.
 
+## 2026-03-22: Add 'w' Hotkey to Write Selected Prompt to /tmp/issue.md
+- **Choice**: Added 'w' key binding in command mode to export the currently selected transcription to /tmp/issue.md as Markdown.
+- **Reason**: Users need a quick way to export a transcription (summary + full text) for issue creation or further processing.
+- **Considered**: Adding a copy-to-clipboard variant, or prompting for filename.
+- **Tradeoff**: Fixed output path (/tmp/issue.md) means only one prompt at a time; users who need multiple prompts must rename or copy the file manually.
+
 ## 2026-03-22: Return To Command Mode After Ctrl+S Save
 - **Choice**: After successfully saving a transcript with Ctrl+S, automatically call `action_focus_recorder()` to return the TUI to command mode (focus on history list).
 - **Reason**: The user workflow is typically: record → edit → save → copy. Requiring an extra Escape press after save is unintuitive and slows down the common case.

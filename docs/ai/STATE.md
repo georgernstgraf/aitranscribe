@@ -6,9 +6,10 @@ Current status as of 2026-03-22.
 Improving TUI workflow ergonomics based on user feedback.
 
 ## Completed (this cycle)
+- [x] Added 'w' hotkey to write selected prompt to /tmp/issue.md.
 - [x] Added automatic return to command mode after Ctrl+S save in TUI.
 - [x] Updated DECISIONS.md with rationale for command mode behavior.
-- [x] Closed GitHub issue #50 documenting the change.
+- [x] Fixed OSC52 clipboard test to skip without terminal environment.
 
 ## Previously Completed
 - [x] Renamed the `english` Recording Mode option to `Cleanup + Translate to English` in the shared preprocessing-mode mapping and the TUI radio buttons.
