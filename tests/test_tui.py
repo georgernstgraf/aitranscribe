@@ -59,6 +59,12 @@ def test_copy_text_with_osc52_writes_escape_sequence():
 
 
 def test_copy_text_to_clipboard_falls_back_to_osc52():
+    """Test OSC52 fallback only works when a terminal is available."""
+    # Skip if no terminal environment (OSC52 requires TERM, TMUX, or TERM_PROGRAM)
+    has_terminal = any(key in os.environ for key in ("TERM", "TMUX", "TERM_PROGRAM"))
+    if not has_terminal:
+        pytest.skip("OSC52 fallback requires a terminal environment (TERM, TMUX, or TERM_PROGRAM)")
+
     stream = StringIO()
     with patch("tui.shutil.which", return_value=None):
         with patch("tui.sys.stdout", stream):
