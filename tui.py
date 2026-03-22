@@ -248,6 +248,7 @@ class AitranscribeTUI(App[None]):
         Binding("ctrl+s", "save_transcript", "Save Transcript"),
         Binding("ctrl+shift+c", "copy_transcript", "Copy Transcript", priority=True),
         Binding("c", "copy_transcript", "Copy Transcript"),
+        Binding("w", "write_issue", "Write Issue File"),
         Binding("delete", "delete_selected_transcription", "Delete Selected"),
         Binding("escape", "focus_recorder", "Recorder Focus"),
         Binding("q", "quit", "Quit"),
@@ -741,6 +742,29 @@ class AitranscribeTUI(App[None]):
             self.status_text = "Copied transcript to clipboard."
         else:
             self.status_text = "Clipboard copy unavailable in this session."
+        self.refresh_status()
+
+    def action_write_issue(self) -> None:
+        if self.selected_history_id is None or self.selected_history_text is None:
+            self.status_text = "No transcription selected to write."
+            self.refresh_status()
+            return
+
+        summary = None
+        for prompt in self.history_prompts:
+            if prompt["id"] == self.selected_history_id:
+                summary = str(prompt.get("summary") or "").strip()
+                break
+
+        issue_path = "/tmp/issue.md"
+        try:
+            with open(issue_path, "w", encoding="utf-8") as f:
+                if summary:
+                    f.write(f"# {summary}\n\n")
+                f.write(self.selected_history_text)
+            self.status_text = f"{issue_path} was (over-)written."
+        except OSError as e:
+            self.status_text = f"Could not write {issue_path}: {e}"
         self.refresh_status()
 
     def on_option_list_option_highlighted(self, event: OptionList.OptionHighlighted) -> None:
