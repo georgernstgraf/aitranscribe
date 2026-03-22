@@ -522,11 +522,11 @@ class AitranscribeTUI(App[None]):
         if not self.is_recording and self.focus_is_interactive():
             return
 
-        # Capture currently displayed transcript as the base for appending
-        # This ensures append mode always builds on the original text
-        current_display = self.get_displayed_transcript()
-        if current_display not in {"No transcript yet.", "Recording in progress...", "Waiting for transcription..."}:
-            self.append_base_text = current_display
+        # Capture the text currently displayed in the editor
+        # This is simpler than tracking multiple state variables
+        current_text = self.get_editor_text().strip()
+        if current_text and current_text not in {"No transcript yet.", "Recording in progress...", "Waiting for transcription..."}:
+            self.append_base_text = current_text
         else:
             self.append_base_text = ""
 
