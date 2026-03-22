@@ -245,6 +245,7 @@ class AitranscribeTUI(App[None]):
 
     BINDINGS = [
         Binding("space", "toggle_recording", "Record / Stop", priority=True),
+        Binding("a", "append_recording", "Append Recording"),
         Binding("ctrl+s", "save_transcript", "Save Transcript"),
         Binding("ctrl+shift+c", "copy_transcript", "Copy Transcript", priority=True),
         Binding("c", "copy_transcript", "Copy Transcript"),
@@ -313,6 +314,7 @@ class AitranscribeTUI(App[None]):
         self.status_text = "Press Space to Start Recording" if self.input_source == "microphone" else "Press Enter on File to Transcribe"
         self.feedback_state = {step_id: "pending" for step_id, _ in self.FEEDBACK_STEPS}
         self.raw_transcript: str | None = None
+        self.append_mode: bool = False
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True)
@@ -364,7 +366,7 @@ class AitranscribeTUI(App[None]):
 
     def refresh_status(self) -> None:
         action = "Space=record" if self.input_source == "microphone" else "Enter on File=transcribe"
-        hint = f"{action} | Ctrl+S=save | Ctrl+Shift+C=copy | Del=list delete | Tab=navigate | Esc=record focus | Q=quit"
+        hint = f"{action} | A=append | Ctrl+S=save | Ctrl+Shift+C=copy | Del=list delete | Tab=navigate | Esc=record focus | Q=quit"
         self.query_one("#status_panel", Static).update(f"{self.status_text}\n{hint}")
 
     def _focus_initial_widget(self) -> None:
@@ -509,6 +511,19 @@ class AitranscribeTUI(App[None]):
         else:
             self.start_recording()
 
+    def action_append_recording(self) -> None:
+        if self.is_processing:
+            return
+
+        if self.input_source == "file":
+            return
+
+        if not self.is_recording and self.focus_is_interactive():
+            return
+
+        self.append_mode = True
+        self.start_recording()
+
     def start_recording(self) -> None:
         try:
             self.recorder.start()
@@ -521,7 +536,8 @@ class AitranscribeTUI(App[None]):
         self.clear_history_selection()
         self.latest_file_path = None
         self.raw_transcript = None
-        self.latest_transcript = "Recording in progress..."
+        if not self.append_mode:
+            self.latest_transcript = "Recording in progress..."
         self.status_text = "Press Space again to Finish"
         self.reset_feedback()
         self.refresh_status()
@@ -586,7 +602,14 @@ class AitranscribeTUI(App[None]):
 
     def update_transcript_from_worker(self, text: str) -> None:
         self.raw_transcript = text
-        self.latest_transcript = text or "No transcript returned."
+        if self.append_mode:
+            current = self.latest_transcript
+            if current in {"No transcript yet.", "Recording in progress...", "Waiting for transcription..."}:
+                self.latest_transcript = text or "No transcript returned."
+            else:
+                self.latest_transcript = current.rstrip() + "\n\n" + (text or "")
+        else:
+            self.latest_transcript = text or "No transcript returned."
         self.refresh_transcript()
 
     def process_audio_worker(self, audio: np.ndarray, settings: dict[str, Any]) -> None:
@@ -636,8 +659,14 @@ class AitranscribeTUI(App[None]):
 
     def processing_finished(self, result: dict[str, str]) -> None:
         self.is_processing = False
+        text = result.get("text", "") or "No transcript returned."
+        if self.append_mode:
+            current = self.latest_transcript
+            if current not in {"No transcript yet.", "Recording in progress...", "Waiting for transcription..."}:
+                text = current.rstrip() + "\n\n" + text
+            self.append_mode = False
         self.clear_history_selection()
-        self.latest_transcript = result.get("text", "") or "No transcript returned."
+        self.latest_transcript = text
         self.raw_transcript = result.get("raw_text") or self.raw_transcript
         self.latest_file_path = result.get("file_path")
         self.status_text = "Press Space to Start Recording" if self.input_source == "microphone" else "File transcription finished. Press Enter on File to run again."
