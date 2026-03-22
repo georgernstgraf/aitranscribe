@@ -57,6 +57,12 @@ Each entry documents WHAT was decided and WHY.
 - **Considered**: Keeping the five-row low-level log, or only adding compression while leaving send/response rows intact.
 - **Tradeoff**: The feedback log is less granular about provider request boundaries, but much clearer about the actual processing pipeline.
 
+## 2026-03-22: Distinguish Overwritten vs New File for 'w' Hotkey
+- **Choice**: Check file existence before writing and show distinct messages.
+- **Reason**: Users need clear feedback whether a file was created new or overwritten.
+- **Considered**: Always showing "saved" without distinction.
+- **Tradeoff**: Adds a file existence check before each write operation.
+
 ## 2026-03-22: Show Save Confirmation Message After Ctrl+S
 - **Choice**: Set status text AFTER calling `action_focus_recorder()` so the save message is visible.
 - **Reason**: The save confirmation was immediately overwritten by the default status message.
