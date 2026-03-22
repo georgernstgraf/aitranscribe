@@ -57,6 +57,12 @@ Each entry documents WHAT was decided and WHY.
 - **Considered**: Keeping the five-row low-level log, or only adding compression while leaving send/response rows intact.
 - **Tradeoff**: The feedback log is less granular about provider request boundaries, but much clearer about the actual processing pipeline.
 
+## 2026-03-22: Show Save Confirmation Message After Ctrl+S
+- **Choice**: Set status text AFTER calling `action_focus_recorder()` so the save message is visible.
+- **Reason**: The save confirmation was immediately overwritten by the default status message.
+- **Considered**: Adding a timed notification system, or keeping focus on editor after save.
+- **Tradeoff**: Users now see the save confirmation briefly before the UI returns to default state.
+
 ## 2026-03-22: Add 'w' Hotkey to Write Selected Prompt to /tmp/issue.md
 - **Choice**: Added 'w' key binding in command mode to export the currently selected transcription to /tmp/issue.md as Markdown.
 - **Reason**: Users need a quick way to export a transcription (summary + full text) for issue creation or further processing.

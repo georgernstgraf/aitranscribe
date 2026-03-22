@@ -6,9 +6,9 @@ Current status as of 2026-03-22.
 Improving TUI workflow ergonomics based on user feedback.
 
 ## Completed (this cycle)
+- [x] Fixed save confirmation message visibility after Ctrl+S (status set after focus change).
 - [x] Added 'w' hotkey to write selected prompt to /tmp/issue.md.
 - [x] Added automatic return to command mode after Ctrl+S save in TUI.
-- [x] Updated DECISIONS.md with rationale for command mode behavior.
 - [x] Fixed OSC52 clipboard test to skip without terminal environment.
 
 ## Previously Completed
