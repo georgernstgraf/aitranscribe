@@ -248,6 +248,7 @@ def test_update_transcript_from_worker_appends_in_append_mode():
     )
 
     app.append_mode = True
+    app.append_base_text = "First transcript"  # The base text to append to
     app.latest_transcript = "First transcript"
 
     with patch.object(app, "refresh_transcript") as mock_refresh:
@@ -313,11 +314,11 @@ def test_append_mode_captures_displayed_transcript():
         with patch.object(app, "reset_feedback"):
             current_display = app.get_displayed_transcript()
             if current_display not in {"No transcript yet.", "Recording in progress...", "Waiting for transcription..."}:
-                app.latest_transcript = current_display
+                app.append_base_text = current_display
             app.append_mode = True
 
-    # latest_transcript should now contain what was displayed (the history item)
-    assert app.latest_transcript == "This is a historical transcript from the history list."
+    # append_base_text should now contain what was displayed (the history item)
+    assert app.append_base_text == "This is a historical transcript from the history list."
 
 
 @pytest.mark.anyio

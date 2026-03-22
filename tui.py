@@ -315,6 +315,7 @@ class AitranscribeTUI(App[None]):
         self.feedback_state = {step_id: "pending" for step_id, _ in self.FEEDBACK_STEPS}
         self.raw_transcript: str | None = None
         self.append_mode: bool = False
+        self.append_base_text: str = ""
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True)
@@ -521,11 +522,13 @@ class AitranscribeTUI(App[None]):
         if not self.is_recording and self.focus_is_interactive():
             return
 
-        # Capture currently displayed transcript before clearing history selection
-        # This ensures append mode builds on what the user sees
+        # Capture currently displayed transcript as the base for appending
+        # This ensures append mode always builds on the original text
         current_display = self.get_displayed_transcript()
         if current_display not in {"No transcript yet.", "Recording in progress...", "Waiting for transcription..."}:
-            self.latest_transcript = current_display
+            self.append_base_text = current_display
+        else:
+            self.append_base_text = ""
 
         self.append_mode = True
         self.start_recording()
@@ -609,11 +612,12 @@ class AitranscribeTUI(App[None]):
     def update_transcript_from_worker(self, text: str) -> None:
         self.raw_transcript = text
         if self.append_mode:
-            current = self.latest_transcript
-            if current in {"No transcript yet.", "Recording in progress...", "Waiting for transcription..."}:
-                self.latest_transcript = text or "No transcript returned."
+            # Always build on the original base text, not on latest_transcript
+            # which may have been modified during processing
+            if self.append_base_text:
+                self.latest_transcript = self.append_base_text.rstrip() + "\n\n" + (text or "")
             else:
-                self.latest_transcript = current.rstrip() + "\n\n" + (text or "")
+                self.latest_transcript = text or "No transcript returned."
         else:
             self.latest_transcript = text or "No transcript returned."
         self.refresh_transcript()
@@ -667,10 +671,11 @@ class AitranscribeTUI(App[None]):
         self.is_processing = False
         text = result.get("text", "") or "No transcript returned."
         if self.append_mode:
-            current = self.latest_transcript
-            if current not in {"No transcript yet.", "Recording in progress...", "Waiting for transcription..."}:
-                text = current.rstrip() + "\n\n" + text
+            # Always build on the original base text, not on latest_transcript
+            if self.append_base_text:
+                text = self.append_base_text.rstrip() + "\n\n" + text
             self.append_mode = False
+            self.append_base_text = ""
         self.clear_history_selection()
         self.latest_transcript = text
         self.raw_transcript = result.get("raw_text") or self.raw_transcript
