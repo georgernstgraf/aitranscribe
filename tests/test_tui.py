@@ -140,6 +140,41 @@ def test_tui_keeps_verbose_from_config_without_widget():
     assert app.verbose is True
 
 
+def test_is_command_mode_without_focused_widget():
+    app = AitranscribeTUI(
+        prompt_manager=Mock(),
+        process_audio=Mock(),
+        process_file=Mock(),
+        stt_provider_name="Groq",
+        llm_provider_name="openrouter",
+        default_stt_model="whisper",
+        default_llm_model="gpt",
+        initial_settings={"pre_process_mode": "english", "input_source": "microphone"},
+    )
+
+    with patch.object(type(app), "focused", new_callable=lambda: property(lambda _self: None)):
+        assert app.is_command_mode() is True
+        assert app.is_pane_focus_mode() is False
+
+
+def test_is_pane_focus_mode_with_history_list_focus():
+    app = AitranscribeTUI(
+        prompt_manager=Mock(),
+        process_audio=Mock(),
+        process_file=Mock(),
+        stt_provider_name="Groq",
+        llm_provider_name="openrouter",
+        default_stt_model="whisper",
+        default_llm_model="gpt",
+        initial_settings={"pre_process_mode": "english", "input_source": "microphone"},
+    )
+    focused = Mock(id="history_list")
+
+    with patch.object(type(app), "focused", new_callable=lambda: property(lambda _self: focused)):
+        assert app.is_pane_focus_mode() is True
+        assert app.is_command_mode() is False
+
+
 def test_feedback_steps_include_compress_stage_first():
     app = AitranscribeTUI(
         prompt_manager=Mock(),
@@ -183,6 +218,60 @@ async def test_refresh_feedback_renders_compress_stage():
         feedback_text = app.query_one("#feedback_panel", Static).render()
 
     assert "Compressing Message" in str(feedback_text)
+
+
+@pytest.mark.anyio
+async def test_refresh_status_shows_command_mode_hint():
+    prompt_manager = Mock()
+    prompt_manager.count_prompts.return_value = 0
+    prompt_manager.recent_prompts.return_value = []
+
+    app = AitranscribeTUI(
+        prompt_manager=prompt_manager,
+        process_audio=Mock(),
+        process_file=Mock(),
+        stt_provider_name="Groq",
+        llm_provider_name="openrouter",
+        default_stt_model="whisper",
+        default_llm_model="gpt",
+        initial_settings={"pre_process_mode": "english", "input_source": "microphone"},
+    )
+
+    async with app.run_test():
+        app.action_enter_command_mode()
+        status_text = str(app.query_one("#status_panel", Static).render())
+
+    assert "Mode: Command Mode" in status_text
+    assert "W=write issue" in status_text
+
+
+@pytest.mark.anyio
+async def test_refresh_status_shows_pane_focus_mode_hint():
+    prompt_manager = Mock()
+    prompt_manager.count_prompts.return_value = 1
+    prompt_manager.recent_prompts.return_value = [
+        {"id": 7, "prompt": "Stored transcript", "filename": "a.mp3", "timestamp": "2026-03-09T11:00:00", "summary": None},
+    ]
+
+    app = AitranscribeTUI(
+        prompt_manager=prompt_manager,
+        process_audio=Mock(),
+        process_file=Mock(),
+        stt_provider_name="Groq",
+        llm_provider_name="openrouter",
+        default_stt_model="whisper",
+        default_llm_model="gpt",
+        initial_settings={"pre_process_mode": "english", "input_source": "microphone"},
+    )
+
+    async with app.run_test():
+        history_list = app.query_one("#history_list", OptionList)
+        app.set_focus(history_list)
+        app.refresh_status()
+        status_text = str(app.query_one("#status_panel", Static).render())
+
+    assert "Mode: Pane Focus Mode" in status_text
+    assert "Esc=command mode" in status_text
 
 
 @pytest.mark.anyio
@@ -259,7 +348,7 @@ def test_update_transcript_from_worker_appends_in_append_mode():
     mock_refresh.assert_called_once()
 
 
-def test_update_transcript_from_worker_append_ignores_placeholder():
+def test_update_transcript_from_worker_append_without_base_uses_new_text():
     prompt_manager = Mock()
 
     app = AitranscribeTUI(
@@ -273,18 +362,55 @@ def test_update_transcript_from_worker_append_ignores_placeholder():
         initial_settings={"pre_process_mode": "english", "input_source": "microphone"},
     )
 
-    for placeholder in ["No transcript yet.", "Recording in progress...", "Waiting for transcription..."]:
-        app.append_mode = True
-        app.latest_transcript = placeholder
+    app.append_mode = True
+    app.append_base_text = ""
 
-        with patch.object(app, "refresh_transcript") as mock_refresh:
-            app.update_transcript_from_worker("New transcript")
+    with patch.object(app, "refresh_transcript") as mock_refresh:
+        app.update_transcript_from_worker("New transcript")
 
-        assert app.latest_transcript == "New transcript", f"Failed for placeholder: {placeholder}"
+    assert app.latest_transcript == "New transcript"
+    mock_refresh.assert_called_once()
 
 
-def test_append_mode_captures_displayed_transcript():
-    """When pressing 'A' with a history item selected, the displayed text should be captured for appending."""
+def test_processing_finished_updates_selected_prompt_in_append_mode():
+    prompt_manager = Mock()
+    prompt_manager.update_prompt.return_value = True
+
+    app = AitranscribeTUI(
+        prompt_manager=prompt_manager,
+        process_audio=Mock(),
+        process_file=Mock(),
+        stt_provider_name="Groq",
+        llm_provider_name="openrouter",
+        default_stt_model="whisper",
+        default_llm_model="gpt",
+        initial_settings={"pre_process_mode": "english", "input_source": "microphone"},
+    )
+
+    app.append_mode = True
+    app.append_target_id = 7
+    app.append_base_text = "First transcript"
+
+    with patch.object(app, "refresh_transcript") as mock_refresh:
+        with patch.object(app, "refresh_status") as mock_status:
+            with patch.object(app, "refresh_history") as mock_history:
+                with patch.object(app, "run_worker") as mock_worker:
+                    app.processing_finished({"text": "Second transcript", "file_path": "/tmp/a.mp3", "prompt_id": "99"})
+
+    prompt_manager.update_prompt.assert_called_once_with(7, "First transcript\n\nSecond transcript")
+    assert app.latest_transcript == "First transcript\n\nSecond transcript"
+    assert app.selected_history_id == 7
+    assert app.selected_history_text == "First transcript\n\nSecond transcript"
+    assert app.append_mode is False
+    assert app.append_target_id is None
+    assert app.append_base_text == ""
+    mock_refresh.assert_called_once()
+    mock_status.assert_called_once()
+    mock_history.assert_called_once()
+    mock_worker.assert_called_once()
+
+
+def test_action_append_recording_requires_selected_saved_transcript():
     prompt_manager = Mock()
 
     app = AitranscribeTUI(
@@ -298,27 +424,45 @@ def test_append_mode_captures_displayed_transcript():
         initial_settings={"pre_process_mode": "english", "input_source": "microphone"},
     )
 
-    # Simulate a history item being selected
+    with patch.object(app, "is_pane_focus_mode", return_value=False):
+        with patch.object(app, "start_recording") as mock_start:
+            with patch.object(app, "refresh_status") as mock_status:
+                app.action_append_recording()
+
+    assert app.append_mode is False
+    assert app.append_target_id is None
+    assert app.append_base_text == ""
+    assert app.status_text == "Select a saved transcription before appending."
+    mock_start.assert_not_called()
+    mock_status.assert_called_once()
+
+
+def test_action_append_recording_uses_selected_saved_transcript_as_base():
+    prompt_manager = Mock()
+
+    app = AitranscribeTUI(
+        prompt_manager=prompt_manager,
+        process_audio=Mock(),
+        process_file=Mock(),
+        stt_provider_name="Groq",
+        llm_provider_name="openrouter",
+        default_stt_model="whisper",
+        default_llm_model="gpt",
+        initial_settings={"pre_process_mode": "english", "input_source": "microphone"},
+    )
+
     app.selected_history_id = 42
     app.selected_history_text = "This is a historical transcript from the history list."
-    app.latest_transcript = "Some old transcript from a previous session."
 
-    # Simulate 'A' key being pressed (append mode)
-    # The currently displayed transcript (selected_history_text) should be captured
-    displayed_before = app.get_displayed_transcript()
-    assert displayed_before == "This is a historical transcript from the history list."
+    with patch.object(app, "is_pane_focus_mode", return_value=False):
+        with patch.object(app, "get_editor_text", return_value="This is a historical transcript from the history list."):
+            with patch.object(app, "start_recording") as mock_start:
+                app.action_append_recording()
 
-    # Simulate what action_append_recording does
-    from unittest.mock import patch
-    with patch.object(app, "refresh_status"):
-        with patch.object(app, "reset_feedback"):
-            current_display = app.get_displayed_transcript()
-            if current_display not in {"No transcript yet.", "Recording in progress...", "Waiting for transcription..."}:
-                app.append_base_text = current_display
-            app.append_mode = True
-
-    # append_base_text should now contain what was displayed (the history item)
+    assert app.append_mode is True
+    assert app.append_target_id == 42
     assert app.append_base_text == "This is a historical transcript from the history list."
+    mock_start.assert_called_once()
 
 
 @pytest.mark.anyio

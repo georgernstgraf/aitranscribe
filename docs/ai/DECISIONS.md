@@ -63,6 +63,12 @@ Each entry documents WHAT was decided and WHY.
 - **Considered**: Always appending, requiring manual clear.
 - **Tradeoff**: Users must remember 'a' for append vs Space for new.
 
+## 2026-03-22: Name TUI Focus States Explicitly
+- **Choice**: Define the two keyboard contexts as `Command Mode` and `Pane Focus Mode`, and surface the active mode in the status panel.
+- **Reason**: The TUI already behaved like a modal interface; making the modes explicit clarifies why global hotkeys like `Space`, `A`, `W`, and `Q` only work after leaving pane focus with `Esc`.
+- **Considered**: Leaving the behavior implicit, or renaming the second mode to `Edit Mode`.
+- **Tradeoff**: Adds more mode wording to the UI, but reduces confusion and makes focus-sensitive behavior easier to maintain.
+
 ## 2026-03-22: Distinguish Overwritten vs New File for 'w' Hotkey
 - **Choice**: Check file existence before writing and show distinct messages.
 - **Reason**: Users need clear feedback whether a file was created new or overwritten.
@@ -70,7 +76,7 @@ Each entry documents WHAT was decided and WHY.
 - **Tradeoff**: Adds a file existence check before each write operation.
 
 ## 2026-03-22: Show Save Confirmation Message After Ctrl+S
-- **Choice**: Set status text AFTER calling `action_focus_recorder()` so the save message is visible.
+- **Choice**: Set status text AFTER calling `action_enter_command_mode()` so the save message is visible.
 - **Reason**: The save confirmation was immediately overwritten by the default status message.
 - **Considered**: Adding a timed notification system, or keeping focus on editor after save.
 - **Tradeoff**: Users now see the save confirmation briefly before the UI returns to default state.
@@ -82,7 +88,7 @@ Each entry documents WHAT was decided and WHY.
 - **Tradeoff**: Fixed output path (/tmp/issue.md) means only one prompt at a time; users who need multiple prompts must rename or copy the file manually.
 
 ## 2026-03-22: Return To Command Mode After Ctrl+S Save
-- **Choice**: After successfully saving a transcript with Ctrl+S, automatically call `action_focus_recorder()` to return the TUI to command mode (focus on history list).
+- **Choice**: After successfully saving a transcript with Ctrl+S, automatically call `action_enter_command_mode()` to return the TUI to Command Mode.
 - **Reason**: The user workflow is typically: record → edit → save → copy. Requiring an extra Escape press after save is unintuitive and slows down the common case.
 - **Considered**: Keeping focus on the editor after save so users can continue editing.
 - **Tradeoff**: Users who want to edit more after saving must press Tab to re-enter the editor instead of just continuing to type. The save-then-copy workflow is more common than save-then-edit-more.

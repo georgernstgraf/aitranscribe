@@ -9,6 +9,7 @@ Improving TUI workflow ergonomics based on user feedback.
 - [x] Add 'a' key to append transcriptions (Space=new, 'a'=append).
 - [x] Fix 'w' hotkey feedback to distinguish overwritten vs new file.
 - [x] Fix save confirmation message visibility after Ctrl+S.
+- [x] Name the TUI focus states explicitly as `Command Mode` and `Pane Focus Mode`.
 
 ## Previously Completed
 - [x] Renamed the `english` Recording Mode option to `Cleanup + Translate to English` in the shared preprocessing-mode mapping and the TUI radio buttons.

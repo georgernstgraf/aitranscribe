@@ -251,7 +251,7 @@ class AitranscribeTUI(App[None]):
         Binding("c", "copy_transcript", "Copy Transcript"),
         Binding("w", "write_issue", "Write Issue File"),
         Binding("delete", "delete_selected_transcription", "Delete Selected"),
-        Binding("escape", "focus_recorder", "Recorder Focus"),
+        Binding("escape", "enter_command_mode", "Command Mode"),
         Binding("q", "quit", "Quit"),
     ]
 
@@ -262,7 +262,7 @@ class AitranscribeTUI(App[None]):
         ("summary", "Creating Summary"),
     ]
 
-    INTERACTIVE_WIDGET_IDS = {
+    PANE_FOCUS_WIDGET_IDS = {
         "source_modes",
         "preprocess_modes",
         "file_path",
@@ -315,6 +315,7 @@ class AitranscribeTUI(App[None]):
         self.feedback_state = {step_id: "pending" for step_id, _ in self.FEEDBACK_STEPS}
         self.raw_transcript: str | None = None
         self.append_mode: bool = False
+        self.append_target_id: int | None = None
         self.append_base_text: str = ""
 
     def compose(self) -> ComposeResult:
@@ -366,9 +367,13 @@ class AitranscribeTUI(App[None]):
             self.run_worker(self.backfill_summaries_worker, thread=True, exclusive=False)
 
     def refresh_status(self) -> None:
-        action = "Space=record" if self.input_source == "microphone" else "Enter on File=transcribe"
-        hint = f"{action} | A=append | Ctrl+S=save | Ctrl+Shift+C=copy | Del=list delete | Tab=navigate | Esc=record focus | Q=quit"
-        self.query_one("#status_panel", Static).update(f"{self.status_text}\n{hint}")
+        mode_label = "Pane Focus Mode" if self.is_pane_focus_mode() else "Command Mode"
+        if self.is_pane_focus_mode():
+            hint = "Esc=command mode | Tab=navigate | Ctrl+S=save | Ctrl+Shift+C=copy"
+        else:
+            action = "Space=record" if self.input_source == "microphone" else "Enter on File=transcribe"
+            hint = f"{action} | A=append | W=write issue | Del=list delete | Ctrl+S=save | Ctrl+Shift+C=copy | Tab=navigate | Q=quit"
+        self.query_one("#status_panel", Static).update(f"Mode: {mode_label}\n{self.status_text}\n{hint}")
 
     def _focus_initial_widget(self) -> None:
         if self.input_source == "file":
@@ -399,6 +404,11 @@ class AitranscribeTUI(App[None]):
         self.selected_history_id = None
         self.selected_history_text = None
         self.selected_history_filename = None
+
+    def cancel_append_mode(self) -> None:
+        self.append_mode = False
+        self.append_target_id = None
+        self.append_base_text = ""
 
     def select_history_prompt(self, index: int) -> None:
         if index < 0 or index >= len(self.history_prompts):
@@ -487,11 +497,14 @@ class AitranscribeTUI(App[None]):
         self.feedback_state = {step_id: "pending" for step_id, _ in self.FEEDBACK_STEPS}
         self.refresh_feedback()
 
-    def focus_is_interactive(self) -> bool:
+    def is_pane_focus_mode(self) -> bool:
         focused = self.focused
-        return focused is not None and focused.id in self.INTERACTIVE_WIDGET_IDS
+        return focused is not None and focused.id in self.PANE_FOCUS_WIDGET_IDS
 
-    def action_focus_recorder(self) -> None:
+    def is_command_mode(self) -> bool:
+        return not self.is_pane_focus_mode()
+
+    def action_enter_command_mode(self) -> None:
         self.screen.set_focus(None)
         if not self.is_recording and not self.is_processing:
             self.status_text = "Press Space to Start Recording" if self.input_source == "microphone" else "Press Enter on File to Transcribe"
@@ -504,7 +517,7 @@ class AitranscribeTUI(App[None]):
         if self.input_source == "file":
             return
 
-        if not self.is_recording and self.focus_is_interactive():
+        if not self.is_recording and self.is_pane_focus_mode():
             return
 
         if self.is_recording:
@@ -519,17 +532,17 @@ class AitranscribeTUI(App[None]):
         if self.input_source == "file":
             return
 
-        if not self.is_recording and self.focus_is_interactive():
+        if not self.is_recording and self.is_pane_focus_mode():
             return
 
-        # Capture the text currently displayed in the editor
-        # This is simpler than tracking multiple state variables
-        current_text = self.get_editor_text().strip()
-        if current_text and current_text not in {"No transcript yet.", "Recording in progress...", "Waiting for transcription..."}:
-            self.append_base_text = current_text
-        else:
-            self.append_base_text = ""
+        if self.selected_history_id is None or self.selected_history_text is None:
+            self.cancel_append_mode()
+            self.status_text = "Select a saved transcription before appending."
+            self.refresh_status()
+            return
 
+        self.append_target_id = self.selected_history_id
+        self.append_base_text = self.get_editor_text().strip()
         self.append_mode = True
         self.start_recording()
 
@@ -542,7 +555,8 @@ class AitranscribeTUI(App[None]):
             return
 
         self.is_recording = True
-        self.clear_history_selection()
+        if not self.append_mode:
+            self.clear_history_selection()
         self.latest_file_path = None
         self.raw_transcript = None
         if not self.append_mode:
@@ -556,6 +570,7 @@ class AitranscribeTUI(App[None]):
         audio = self.recorder.stop()
         self.is_recording = False
         if audio is None or len(audio) == 0:
+            self.cancel_append_mode()
             self.latest_transcript = "No audio recorded."
             self.latest_file_path = None
             self.status_text = "Press Space to Start Recording"
@@ -612,8 +627,6 @@ class AitranscribeTUI(App[None]):
     def update_transcript_from_worker(self, text: str) -> None:
         self.raw_transcript = text
         if self.append_mode:
-            # Always build on the original base text, not on latest_transcript
-            # which may have been modified during processing
             if self.append_base_text:
                 self.latest_transcript = self.append_base_text.rstrip() + "\n\n" + (text or "")
             else:
@@ -654,6 +667,7 @@ class AitranscribeTUI(App[None]):
 
     def processing_failed(self, error_message: str) -> None:
         self.is_processing = False
+        self.cancel_append_mode()
         self.clear_history_selection()
         for step_id, current in list(self.feedback_state.items()):
             if current == "active":
@@ -670,13 +684,18 @@ class AitranscribeTUI(App[None]):
     def processing_finished(self, result: dict[str, str]) -> None:
         self.is_processing = False
         text = result.get("text", "") or "No transcript returned."
+        prompt_id = result.get("prompt_id", "").strip()
         if self.append_mode:
-            # Always build on the original base text, not on latest_transcript
             if self.append_base_text:
                 text = self.append_base_text.rstrip() + "\n\n" + text
-            self.append_mode = False
-            self.append_base_text = ""
-        self.clear_history_selection()
+            target_id = self.append_target_id
+            if target_id is not None and self.prompt_manager.update_prompt(target_id, text):
+                prompt_id = str(target_id)
+                self.selected_history_id = target_id
+                self.selected_history_text = text
+            self.cancel_append_mode()
+        else:
+            self.clear_history_selection()
         self.latest_transcript = text
         self.raw_transcript = result.get("raw_text") or self.raw_transcript
         self.latest_file_path = result.get("file_path")
@@ -684,7 +703,6 @@ class AitranscribeTUI(App[None]):
         self.refresh_transcript()
         self.refresh_status()
         self.refresh_history()
-        prompt_id = result.get("prompt_id", "").strip()
         if prompt_id:
             self.run_worker(lambda: self.generate_summary_for_prompt_worker(int(prompt_id), self.latest_transcript), thread=True, exclusive=False)
 
@@ -733,7 +751,7 @@ class AitranscribeTUI(App[None]):
                 self.selected_history_text = text
                 self.latest_transcript = text
                 self.refresh_history()
-                self.action_focus_recorder()
+                self.action_enter_command_mode()
                 self.status_text = f"Saved transcription #{self.selected_history_id}."
                 self.refresh_status()
             else:
@@ -752,7 +770,7 @@ class AitranscribeTUI(App[None]):
             self.selected_history_filename = filename
             self.latest_transcript = text
             self.refresh_history()
-            self.action_focus_recorder()
+            self.action_enter_command_mode()
             self.status_text = f"Saved transcription #{prompt_id}."
             self.refresh_status()
 
