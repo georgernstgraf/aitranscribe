@@ -1,11 +1,16 @@
 # Project State
 
-Current status as of 2026-03-11.
+Current status as of 2026-03-22.
 
 ## Current Focus
-Keep the TUI naming and docs aligned while the remaining work stays on manual real-terminal validation.
+Improving TUI workflow ergonomics based on user feedback.
 
 ## Completed (this cycle)
+- [x] Added automatic return to command mode after Ctrl+S save in TUI.
+- [x] Updated DECISIONS.md with rationale for command mode behavior.
+- [x] Closed GitHub issue #50 documenting the change.
+
+## Previously Completed
 - [x] Renamed the `english` Recording Mode option to `Cleanup + Translate to English` in the shared preprocessing-mode mapping and the TUI radio buttons.
 - [x] Renamed the `cleanup` Recording Mode option to `Cleanup Text / Preserve Language` in the shared preprocessing-mode mapping and the TUI radio buttons.
 - [x] Updated README wording so TUI preprocessing mode descriptions and the direct-English example heading match the new labels.

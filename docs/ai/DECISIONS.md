@@ -57,6 +57,12 @@ Each entry documents WHAT was decided and WHY.
 - **Considered**: Keeping the five-row low-level log, or only adding compression while leaving send/response rows intact.
 - **Tradeoff**: The feedback log is less granular about provider request boundaries, but much clearer about the actual processing pipeline.
 
+## 2026-03-22: Return To Command Mode After Ctrl+S Save
+- **Choice**: After successfully saving a transcript with Ctrl+S, automatically call `action_focus_recorder()` to return the TUI to command mode (focus on history list).
+- **Reason**: The user workflow is typically: record → edit → save → copy. Requiring an extra Escape press after save is unintuitive and slows down the common case.
+- **Considered**: Keeping focus on the editor after save so users can continue editing.
+- **Tradeoff**: Users who want to edit more after saving must press Tab to re-enter the editor instead of just continuing to type. The save-then-copy workflow is more common than save-then-edit-more.
+
 ## 2026-03-11: Make Sidebar History Fill Remaining Height And Re-Refresh After Mount
 - **Choice**: Let the `Transcriptions` panel consume the remaining sidebar height with `height: 1fr` while `Recording Mode` and `Configuration` stay auto-sized, and trigger a second history refresh after the first layout pass on startup.
 - **Reason**: The right column should mirror the left column's behavior, and startup history previews need the same stable width calculation that later refreshes already use.
