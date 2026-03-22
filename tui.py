@@ -521,6 +521,12 @@ class AitranscribeTUI(App[None]):
         if not self.is_recording and self.focus_is_interactive():
             return
 
+        # Capture currently displayed transcript before clearing history selection
+        # This ensures append mode builds on what the user sees
+        current_display = self.get_displayed_transcript()
+        if current_display not in {"No transcript yet.", "Recording in progress...", "Waiting for transcription..."}:
+            self.latest_transcript = current_display
+
         self.append_mode = True
         self.start_recording()
 

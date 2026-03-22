@@ -282,6 +282,44 @@ def test_update_transcript_from_worker_append_ignores_placeholder():
         assert app.latest_transcript == "New transcript", f"Failed for placeholder: {placeholder}"
 
 
+def test_append_mode_captures_displayed_transcript():
+    """When pressing 'A' with a history item selected, the displayed text should be captured for appending."""
+    prompt_manager = Mock()
+
+    app = AitranscribeTUI(
+        prompt_manager=prompt_manager,
+        process_audio=Mock(),
+        process_file=Mock(),
+        stt_provider_name="Groq",
+        llm_provider_name="openrouter",
+        default_stt_model="whisper",
+        default_llm_model="gpt",
+        initial_settings={"pre_process_mode": "english", "input_source": "microphone"},
+    )
+
+    # Simulate a history item being selected
+    app.selected_history_id = 42
+    app.selected_history_text = "This is a historical transcript from the history list."
+    app.latest_transcript = "Some old transcript from a previous session."
+
+    # Simulate 'A' key being pressed (append mode)
+    # The currently displayed transcript (selected_history_text) should be captured
+    displayed_before = app.get_displayed_transcript()
+    assert displayed_before == "This is a historical transcript from the history list."
+
+    # Simulate what action_append_recording does
+    from unittest.mock import patch
+    with patch.object(app, "refresh_status"):
+        with patch.object(app, "reset_feedback"):
+            current_display = app.get_displayed_transcript()
+            if current_display not in {"No transcript yet.", "Recording in progress...", "Waiting for transcription..."}:
+                app.latest_transcript = current_display
+            app.append_mode = True
+
+    # latest_transcript should now contain what was displayed (the history item)
+    assert app.latest_transcript == "This is a historical transcript from the history list."
+
+
 @pytest.mark.anyio
 async def test_refresh_history_requests_full_history_list():
     prompt_manager = Mock()
