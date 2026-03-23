@@ -656,7 +656,11 @@ def process_recorded_audio_for_tui(
         else:
             update_feedback("post_process", "done")
 
-        prompt_id = prompt_manager.add_prompt(final_text, final_mp3_file)
+        append_mode = bool(settings.get("append_mode", False))
+        if append_mode:
+            prompt_id = None
+        else:
+            prompt_id = prompt_manager.add_prompt(final_text, final_mp3_file)
 
         return {
             "text": final_text,
@@ -728,7 +732,11 @@ def process_file_for_tui(
         else:
             update_feedback("post_process", "done")
 
-        prompt_id = prompt_manager.add_prompt(final_text, file_for_processing)
+        append_mode = bool(settings.get("append_mode", False))
+        if append_mode:
+            prompt_id = None
+        else:
+            prompt_id = prompt_manager.add_prompt(final_text, file_for_processing)
         return {
             "text": final_text or "No transcript returned.",
             "raw_text": raw_text,

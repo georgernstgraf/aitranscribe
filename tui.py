@@ -705,6 +705,7 @@ class AitranscribeTUI(App[None]):
             "stt_model": self.query_one("#stt_model", Input).value.strip() or self.default_stt_model,
             "llm_model": self.query_one("#llm_model", Input).value.strip() or self.default_llm_model,
             "verbose": self.verbose,
+            "append_mode": self.append_mode,
         }
 
     def persist_setting_value(self, setting_name: str, value: Any) -> None:
