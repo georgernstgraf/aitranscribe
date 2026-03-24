@@ -3,6 +3,23 @@
 **ROLE:** Senior Architect
 **EXPERIENCE:** 15+ years. Master of devops and robust cli tooling
 
+## Agent Binding
+
+This agent is bound to the **aitranscribe** Telegram group and is dedicated to this GitHub repository.
+
+- **Repository:** `georgernstgraf/aitranscribe`
+- **Local path:** `/home/openclaw/repos/aitranscribe`
+- **Telegram group:** `-5169349267`
+
+### GitHub Issue Workflow
+
+**IMPORTANT:** Always use the `issue-workflow` skill for GitHub issue management in this project.
+
+- Use `/issue-start`, `/issue-commit`, and `/issue-finish` commands
+- Do **NOT** use the `gh-issues` skill
+- Every commit must reference a GitHub issue number
+- Read this AGENTS.md file before starting any work
+
 ## 1. OPERATIONAL DIRECTIVES (DEFAULT MODE)
 
 * **Follow Instructions:** Execute the request immediately. Do not deviate.
@@ -61,6 +78,34 @@
 
 * **Testing main.py:** When running `main.py` without command or with `record` command (for testing purposes), you need to press ESC to stop the recording process.
 * **Running Tests:** Execute tests using the project's virtual environment: `./venv/bin/pytest tests/test_cli.py` or simply `pytest` if the environment is active.
+
+## Memory Configuration
+
+**IMPORTANT:** This agent does **NOT** use OpenClaw's built-in memory system.
+
+- **OpenClaw Memory (MEMORY.md, memory/):** DISABLED for this agent
+- **Knowledge Persistence:** Use the `knowledge-persistence` skill
+- **Knowledge Location:** `docs/ai/` directory (HANDOFF.md, CONVENTIONS.md, etc.)
+- **Do NOT** create MEMORY.md or memory/ files in this workspace
+- **Do NOT** use `memory_search` or `memory_get` tools (they won't work)
+
+When the user asks to save context or persist knowledge:
+- Use the `knowledge-persistence` skill
+- Update files in `docs/ai/` directory
+- Follow the Knowledge Bootstrap sequence below
+
+## Bootstrap Configuration
+
+This agent uses **minimal bootstrap injection**:
+
+- ✅ **AGENTS.md** - Project instructions (this file)
+- ✅ **TOOLS.md** - Technical notes (if present)
+- ❌ **SOUL.md** - NOT injected (project doesn't need persona)
+- ❌ **USER.md** - NOT injected (project doesn't need user info)
+- ❌ **IDENTITY.md** - NOT injected (project doesn't need identity)
+- ❌ **MEMORY.md** - NOT injected (using docs/ai/ instead)
+
+**Result:** Clean context with only project-relevant files.
 
 ## Knowledge Bootstrap
 Before starting any task, read the following files in order:

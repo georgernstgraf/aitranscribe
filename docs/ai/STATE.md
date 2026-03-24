@@ -1,11 +1,14 @@
 # Project State
 
-Current status as of 2026-03-22.
+Current status as of 2026-03-23.
 
 ## Current Focus
 TUI workflow ergonomics are improved; remaining work is manual real-terminal validation and any follow-up polish that emerges from it.
 
-## Completed (this cycle)
+## Completed (this session)
+- [x] Fix append mode duplicate record bug — `add_prompt()` was always called even during append, creating unwanted duplicate records. Now passes `append_mode` through settings and skips insert when True.
+
+## Completed (previous cycle)
 - [x] Add 'a' key to append transcriptions (Space=new, 'a'=append).
 - [x] Fix 'w' hotkey feedback to distinguish overwritten vs new file.
 - [x] Fix save confirmation message visibility after Ctrl+S.
@@ -33,4 +36,4 @@ TUI workflow ergonomics are improved; remaining work is manual real-terminal val
 - None
 
 ## Next Session Suggestion
-Start with a real-terminal TUI launch to validate the refined modal state/flash feedback behavior and append workflow with real mouse and microphone interaction, then continue the remaining manual validation passes.
+Start with a real-terminal TUI launch to validate the append mode fix and refined modal state/flash feedback behavior with real mouse and microphone interaction, then continue the remaining manual validation passes.
