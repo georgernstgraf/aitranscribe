@@ -15,3 +15,6 @@ android/captures
 android/.externalNativeBuild
 android.cxx
 android/local.properties
+
+# Symlinked skills from opencode-helpers (not tracked)
+skills/
