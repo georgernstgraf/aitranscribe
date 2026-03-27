@@ -1,28 +1,13 @@
 # Project State
 
-Current status as of 2026-03-23.
+Current status as of 2026-03-27.
 
 ## Current Focus
-TUI workflow ergonomics are improved; remaining work is manual real-terminal validation and any follow-up polish that emerges from it.
+SQLite journal mode fix merged; AGENTS.md pre-check for skills added. Ready for next TUI validation session.
 
 ## Completed (this session)
-- [x] Fix append mode duplicate record bug — `add_prompt()` was always called even during append, creating unwanted duplicate records. Now passes `append_mode` through settings and skips insert when True.
-
-## Completed (previous cycle)
-- [x] Add 'a' key to append transcriptions (Space=new, 'a'=append).
-- [x] Fix 'w' hotkey feedback to distinguish overwritten vs new file.
-- [x] Fix save confirmation message visibility after Ctrl+S.
-- [x] Name the TUI focus states explicitly as `Command Mode` and `Pane Focus Mode`.
-- [x] Split the status area into separate state and flash-feedback fields.
-- [x] Restore visible save/copy/write/delete confirmations in the TUI flash field.
-- [x] Remove the redundant `Ctrl+Shift+C` copy binding and keep `C` as the copy hotkey.
-- [x] Make append mode use the selected saved transcription as the source of truth for both rendering and persistence.
-- [x] Keep the existing transcript visible immediately after pressing `A` to append.
-
-## Previously Completed
-- [x] Renamed the `english` Recording Mode option to `Cleanup + Translate to English` in the shared preprocessing-mode mapping and the TUI radio buttons.
-- [x] Renamed the `cleanup` Recording Mode option to `Cleanup Text / Preserve Language` in the shared preprocessing-mode mapping and the TUI radio buttons.
-- [x] Updated README wording so TUI preprocessing mode descriptions and the direct-English example heading match the new labels.
+- [x] Fix SQLite journal mode to DELETE for cloud sync compatibility (OneDrive, Dropbox, etc.)
+- [x] Add skill source PRE-CHECK section to AGENTS.md to prevent OpenClaw bundled skill usage
 
 ## Pending
 - [ ] Manually validate the TUI workflow in a real terminal with microphone access.

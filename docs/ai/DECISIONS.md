@@ -111,6 +111,18 @@ Each entry documents WHAT was decided and WHY.
 - **Considered**: Continuing to use editor text as the append base, or trying to synchronize editor text more aggressively.
 - **Tradeoff**: Append now depends on a saved selection being present, but the rendered transcript and persisted transcript always use the same source of truth.
 
+## 2026-03-27: Use DELETE Journal Mode for SQLite Cloud Sync Compatibility
+- **Choice**: Explicitly set `PRAGMA journal_mode=DELETE` in the SQLite connection method for `prompts.sqlite`.
+- **Reason**: Cloud storage services (OneDrive, Dropbox, etc.) do not work well with SQLite WAL mode because the `-wal` and `-shm` files cause sync conflicts and potential corruption.
+- **Considered**: Leaving the default (DELETE on most systems) without explicit pragma, or documenting that the database file must not be placed in cloud-synced directories.
+- **Tradeoff**: DELETE mode has slightly worse concurrent-write performance than WAL, but this is irrelevant for single-user desktop transcription history.
+
+## 2026-03-27: Add Skill Source Pre-Check To AGENTS.md
+- **Choice**: Add a prominent PRE-CHECK section at the top of AGENTS.md instructing the agent to use only workspace `skills/` directory and ignore OpenClaw bundled skills.
+- **Reason**: The `available_skills` list in the system prompt appears before AGENTS.md, causing the agent to see "github skill available" before reading the prohibition.
+- **Considered**: Relying on the existing "Framework Isolation" section further down the file.
+- **Tradeoff**: Adds a redundant-looking section at the top, but prevents the agent from using wrong skills when it reads top-to-bottom.
+
 ## 2026-03-11: Make Sidebar History Fill Remaining Height And Re-Refresh After Mount
 - **Choice**: Let the `Transcriptions` panel consume the remaining sidebar height with `height: 1fr` while `Recording Mode` and `Configuration` stay auto-sized, and trigger a second history refresh after the first layout pass on startup.
 - **Reason**: The right column should mirror the left column's behavior, and startup history previews need the same stable width calculation that later refreshes already use.

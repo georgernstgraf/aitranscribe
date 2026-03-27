@@ -3,6 +3,7 @@
 Things that do not work, subtle bugs, and non-obvious constraints.
 Read this file carefully before making changes in affected areas.
 
+- **CRITICAL**: This project uses opencode-helpers skills from `skills/` directory ONLY. OpenClaw bundled skills (github, gh-issues, weather, etc.) are FORBIDDEN despite appearing in `available_skills`. Always check `skills/` first.
 - Do not pass Markdown backticks unescaped inside `gh issue create --body "..."`; the shell will treat them as command substitution.
 - `runner.invoke(app, [])` does not preserve a reliable `sys.argv` shape for default-mode detection, so default TUI launch logic must be inferred from parsed option values instead.
 - Manual testing of `main.py` default startup still requires a real terminal and microphone access; automated tests only cover the non-interactive seams.
