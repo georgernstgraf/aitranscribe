@@ -42,6 +42,16 @@ SUMMARY_PROMPT = (
     "Output only the summary text with no quotes, labels, or extra commentary."
 )
 
+TRANSLATE_TO_GERMAN_PROMPT = (
+    "Translate the following text to German. "
+    "Output ONLY the translated text with no introductory remarks or explanations."
+)
+
+TRANSLATE_TO_ENGLISH_PROMPT = (
+    "Translate the following text to English. "
+    "Output ONLY the translated text with no introductory remarks or explanations."
+)
+
 LLM_PROVIDERS = {
     "openrouter": {
         "base_url": "https://openrouter.ai/api/v1",
@@ -611,6 +621,17 @@ def backfill_missing_summaries(manager: PromptManager, llm_model: str) -> int:
             updated += 1
     return updated
 
+
+def translate_text(text: str, target_language: str, llm_model: str) -> str | None:
+    """Translate text to target language using LLM."""
+    cleaned = text.strip()
+    if not cleaned or not llm_client:
+        return None
+
+    prompt = TRANSLATE_TO_GERMAN_PROMPT if target_language == "german" else TRANSLATE_TO_ENGLISH_PROMPT
+    translated = process_with_llm(llm_client, cleaned, prompt, llm_model).strip()
+    return translated or None
+
 # Initialize PromptManager
 prompt_manager = PromptManager(PROMPTS_FILE)
 
@@ -769,6 +790,7 @@ def launch_tui() -> None:
         persist_setting=persist_tui_setting,
         generate_summary=generate_prompt_summary,
         backfill_summaries=lambda: backfill_missing_summaries(prompt_manager, settings["llm_model"]),
+        translate_text=translate_text,
     )
     app.run()
 

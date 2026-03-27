@@ -25,6 +25,7 @@ TranscriptCallback = Callable[[str], None]
 ProcessAudioCallback = Callable[[np.ndarray, dict[str, Any], FeedbackCallback, TranscriptCallback], dict[str, Any]]
 ProcessFileCallback = Callable[[str, dict[str, Any], FeedbackCallback, TranscriptCallback], dict[str, Any]]
 GenerateSummaryCallback = Callable[[str, str], str | None]
+TranslateCallback = Callable[[str, str, str], str | None]
 BackfillSummariesCallback = Callable[[], int]
 
 
@@ -262,6 +263,8 @@ class AitranscribeTUI(App[None]):
         Binding("a", "append_recording", "Append Recording"),
         Binding("ctrl+s", "save_transcript", "Save Transcript"),
         Binding("c", "copy_transcript", "Copy Transcript"),
+        Binding("d", "translate_to_german", "→ German"),
+        Binding("e", "translate_to_english", "→ English"),
         Binding("w", "write_issue", "Write Issue File"),
         Binding("delete", "delete_selected_transcription", "Delete Selected"),
         Binding("escape", "enter_command_mode", "Command Mode"),
@@ -299,6 +302,7 @@ class AitranscribeTUI(App[None]):
         persist_setting: Callable[[str, Any], None] | None = None,
         generate_summary: GenerateSummaryCallback | None = None,
         backfill_summaries: BackfillSummariesCallback | None = None,
+        translate_text: TranslateCallback | None = None,
     ) -> None:
         super().__init__()
         self.prompt_manager = prompt_manager
@@ -307,6 +311,7 @@ class AitranscribeTUI(App[None]):
         self.persist_setting = persist_setting
         self.generate_summary = generate_summary
         self.backfill_summaries = backfill_summaries
+        self.translate_text = translate_text
         self.stt_provider_name = stt_provider_name
         self.llm_provider_name = llm_provider_name
         self.default_stt_model = default_stt_model
@@ -921,6 +926,42 @@ class AitranscribeTUI(App[None]):
                 self.set_status_message(f"{issue_path} was written.")
         except OSError as e:
             self.set_status_message(f"Could not write {issue_path}: {e}")
+        self.refresh_status()
+
+    def action_translate_to_german(self) -> None:
+        self._translate_transcript("german")
+
+    def action_translate_to_english(self) -> None:
+        self._translate_transcript("english")
+
+    def _translate_transcript(self, target_language: str) -> None:
+        if not self.translate_text:
+            self.set_status_message("Translation unavailable (no LLM client).")
+            self.refresh_status()
+            return
+
+        text = self.get_editor_text().strip()
+        if not text or text in {"No transcript yet.", "Recording in progress...", "Waiting for transcription..."}:
+            self.set_status_message("No transcript to translate.")
+            self.refresh_status()
+            return
+
+        llm_model = str(self.initial_settings.get("llm_model", self.default_llm_model))
+        lang_name = "German" if target_language == "german" else "English"
+
+        self.set_status_message(f"Translating to {lang_name}...")
+        self.refresh_status()
+
+        try:
+            translated = self.translate_text(text, target_language, llm_model)
+            if translated:
+                self.set_editor_text(translated)
+                self.set_status_message(f"Translated to {lang_name}.")
+            else:
+                self.set_status_message("Translation failed.")
+        except Exception as e:
+            self.set_status_message(f"Translation error: {e}")
+
         self.refresh_status()
 
     def on_option_list_option_highlighted(self, event: OptionList.OptionHighlighted) -> None:
