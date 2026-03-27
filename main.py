@@ -355,7 +355,11 @@ class PromptManager:
         self._initialize_db()
 
     def _connect(self) -> sqlite3.Connection:
-        return sqlite3.connect(self.prompts_file)
+        conn = sqlite3.connect(self.prompts_file)
+        # Explicitly use DELETE journal mode for cloud sync compatibility (OneDrive, Dropbox, etc.)
+        # WAL mode creates extra -wal/-shm files that cause sync conflicts
+        conn.execute("PRAGMA journal_mode=DELETE")
+        return conn
 
     def _initialize_db(self) -> None:
         try:
