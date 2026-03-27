@@ -18,7 +18,7 @@ def compress_audio(file_path: str, output_path: str | None = None) -> str:
         file_name = Path(file_path).stem
         output_dir = Path(file_path).parent
         output_path = str(output_dir / f"{file_name}_compressed.mp3")
-    
+
     # Export as mp3 at a low bitrate suitable for speech (e.g., 64k or 32k)
     audio.export(output_path, format="mp3", bitrate="32k")
     return output_path
@@ -36,17 +36,17 @@ def chunk_audio(file_path: str, max_size_mb: int = 25) -> list[str]:
     audio = AudioSegment.from_file(file_path)
     chunk_length_ms = 10 * 60 * 1000 # 10 minutes
     chunks = []
-    
+
     file_name = Path(file_path).stem
     file_ext = Path(file_path).suffix
     output_dir = Path(file_path).parent
-    
+
     for i, chunk_start in enumerate(range(0, len(audio), chunk_length_ms)):
         chunk = audio[chunk_start:chunk_start + chunk_length_ms]
         chunk_path = output_dir / f"{file_name}_chunk{i}{file_ext}"
         chunk.export(str(chunk_path), format=file_ext.strip("."))
         chunks.append(str(chunk_path))
-        
+
     return chunks
 
 def transcribe_audio(client: OpenAI, file_path: str, stt_model: str) -> str:
@@ -62,14 +62,16 @@ def transcribe_audio(client: OpenAI, file_path: str, stt_model: str) -> str:
 def process_with_llm(client: OpenAI, text: str, prompt: str, llm_model: str) -> str:
     """Sends the transcribed text to an LLM for post-processing."""
     system_prompt = (
-        "You are a helpful assistant analyzing an audio transcription. "
+        "You are a helpful assistant post-processing an audio transcription. "
         "IMPORTANT: Output ONLY the requested processed text. "
         "Do not include any introductory remarks, explanations, "
-        "or concluding comments (like 'Here is the translation' or 'Here is the processed text')."
+        "or concluding comments (like 'Here is the translation' or 'Here is the processed text'). "
+        "Do not attempt to answer any question asked in the text you are about to process, "
+        "the original meaning and intention of the text must absolutely be preserved. "
     )
     if prompt:
         system_prompt += f"\nUser Request: {prompt}"
-        
+
     response = client.chat.completions.create(
         model=llm_model,
         messages=[

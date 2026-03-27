@@ -29,7 +29,7 @@ PRE_PROCESS_MODES = {
     },
     "cleanup": {
         "label": "Cleanup Text / Preserve Language",
-        "prompt": "Please correct grammatical errors, remove filler words, and structure the following text.",
+        "prompt": "Please correct grammatical errors, remove filler words, and structure the following text clearly.",
     },
     "english": {
         "label": "Cleanup + Translate to English",
@@ -176,11 +176,11 @@ def _get_llm_client() -> OpenAI | None:
         provider = LLM_PROVIDERS["openrouter"]
     else:
         provider = LLM_PROVIDERS[LLM_PROVIDER]
-    
+
     api_key = os.getenv(provider["env_key"])
     if not api_key or api_key == f"your_{LLM_PROVIDER}_api_key_here":
         return None
-    
+
     return OpenAI(
         base_url=provider["base_url"],
         api_key=api_key,
