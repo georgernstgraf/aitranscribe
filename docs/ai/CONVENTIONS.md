@@ -30,6 +30,11 @@ Follow these without question. Do not deviate unless explicitly told.
 - Keep TUI mode state and user feedback separate: the left status field shows derived `Command Mode` / `Pane Focus Mode` plus activity, and the right flash field shows the latest action confirmation or error.
 - In append mode, use the selected saved transcription as the render and persistence source of truth instead of transient editor text.
 
+## Pane Focus Mode
+- When a user clicks in a pane during pane focus mode, perform the action and then immediately return to command mode.
+- Exception: Filesystem file selection stays in pane mode so the user can enter the file path.
+- Call `action_enter_command_mode()` after the action completes, not instantly on click.
+
 ## Testing
 - Cover TUI integration points from the CLI layer with focused unit tests instead of trying to run an interactive terminal session in `pytest`.
 - Add focused unit tests for clipboard fallback helpers and TUI state-selection behavior instead of trying to verify them through live terminal automation.
