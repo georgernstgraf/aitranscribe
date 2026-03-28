@@ -971,6 +971,7 @@ class AitranscribeTUI(App[None]):
     def on_option_list_option_selected(self, event: OptionList.OptionSelected) -> None:
         if event.option_list.id == "history_list":
             self.select_history_prompt(event.option_index)
+            self.action_enter_command_mode()
 
     def on_radio_set_changed(self, event: RadioSet.Changed) -> None:
         if event.radio_set.id == "source_modes" and event.pressed.id:
@@ -979,10 +980,13 @@ class AitranscribeTUI(App[None]):
             self.set_idle_status()
             if self.input_source == "file":
                 self.set_focus(self.query_one("#file_path", Input))
+            else:
+                self.action_enter_command_mode()
             self.refresh_status()
         elif event.radio_set.id == "preprocess_modes" and event.pressed.id:
             self.pre_process_mode = event.pressed.id.removeprefix("mode-")
             self.persist_setting_value("pre_process_mode", self.pre_process_mode)
+            self.action_enter_command_mode()
 
     def on_input_changed(self, event: Input.Changed) -> None:
         if event.input.id == "file_path":
