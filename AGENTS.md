@@ -3,8 +3,12 @@
 ## ⚠️ PRE-CHECK: SKILL SOURCE (MUST READ FIRST)
 
 **BEFORE using ANY skill:**
-1. Use skills provided by opencode's `available_skills` list
-2. Do NOT fall back to OpenClaw bundled skills
+1. Check `skills/` directory in this workspace
+2. If a skill exists there → use it
+3. If NOT found there → do NOT fall back to OpenClaw bundled skills
+4. OpenClaw's `available_skills` list is IRRELEVANT for this project
+
+This project uses opencode-helpers skills ONLY.
 
 ---
 
@@ -25,11 +29,11 @@ This agent operates with ZERO knowledge of the OpenClaw framework.
 - Standard git/github operations (commit, push, PR)
 - AGENTS.md for project instructions
 - docs/ai/ knowledge files
-- **ONLY skills from opencode's available_skills** (opencode-helpers skills)
+- **ONLY skills from workspace skills/ directory** (opencode-helpers skills)
 - Project-specific workflows only
 
 **Skill Usage Rule:**
-Use skills from opencode's `available_skills` list. Ignore any OpenClaw bundled skills that may appear available.
+Only use skills available in this workspace's `skills/` directory (symlinked from opencode-helpers). Ignore any OpenClaw bundled skills that may appear available.
 
 ## Repository
 
@@ -100,7 +104,7 @@ Use skills from opencode's `available_skills` list. Ignore any OpenClaw bundled 
 **IMPORTANT:** This agent does **NOT** use OpenClaw's built-in memory system.
 
 - **OpenClaw Memory (MEMORY.md, memory/):** DISABLED for this agent
-- **Knowledge Persistence:** Use the `knowledge-persistence` skill (available via opencode)
+- **Knowledge Persistence:** Use the `knowledge-persistence` skill
 - **Knowledge Location:** `docs/ai/` directory (HANDOFF.md, CONVENTIONS.md, etc.)
 - **Do NOT** create MEMORY.md or memory/ files in this workspace
 - **Do NOT** use `memory_search` or `memory_get` tools (they won't work)
@@ -130,40 +134,7 @@ Before starting any task, read the following files in order:
 3. `docs/ai/DECISIONS.md`
 4. `docs/ai/PITFALLS.md`
 5. `docs/ai/STATE.md`
-6. `docs/ai/DOMAIN.md` (if task involves business logic — includes LLM prompts, transcription modes, pipeline rules)
+6. `docs/ai/DOMAIN.md` (if task involves business logic)
 
 If `HANDOFF.md` contains open tasks, complete them before starting
 any new work unless the user explicitly says otherwise.
-
-## Knowledge Persistence Triggers
-
-Persist knowledge updates in these situations:
-1. **End of productive session** — always update STATE.md and HANDOFF.md
-2. **After an architectural or technical decision** — add to DECISIONS.md immediately
-3. **After discovering a bug, constraint, or non-obvious behavior** — add to PITFALLS.md
-4. **After establishing a coding pattern or naming rule** — add to CONVENTIONS.md
-5. **When the user asks to "save context" or "persist knowledge"** — full persistence run
-
-## Knowledge File Content Guide
-
-| File | Contains | Disambiguation Test |
-|------|----------|---------------------|
-| DECISIONS.md | One-time choices with rationale | "Is this a past choice I made?" |
-| CONVENTIONS.md | Ongoing rules to follow every time | "Must I follow this on every change?" |
-| PITFALLS.md | Things that don't work, subtle bugs | "Would a new agent repeat this mistake?" |
-| STATE.md | Current project status (overwritten entirely) | "What's happening right now?" |
-| HANDOFF.md | Pending tasks for next agent | "What's unfinished?" |
-| DOMAIN.md | Business rules not obvious from code | "Would a developer miss this from code alone?" |
-
-Keep each knowledge file under 200 lines. If a file exceeds this, split by topic
-(e.g., `CONVENTIONS-ui.md`, `CONVENTIONS-db.md`).
-
-## Knowledge Persistence Protocol (Fallback)
-
-If the `knowledge-persistence` skill is not available:
-1. Read all existing `docs/ai/` files
-2. Identify new facts, decisions, patterns from this session not yet recorded
-3. Append to the correct file using the content guide above (do not duplicate)
-4. Overwrite STATE.md entirely with current status
-5. Update HANDOFF.md: clear if done, or list pending tasks with context
-6. Report which files were changed and how many entries were added
