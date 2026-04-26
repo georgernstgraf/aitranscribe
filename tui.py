@@ -10,7 +10,6 @@ from typing import Any, Callable, Mapping
 
 import numpy as np
 from rich.text import Text
-import sounddevice as sd
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
@@ -86,6 +85,43 @@ def copy_text_to_clipboard(text: str) -> bool:
     return copy_text_with_osc52(text)
 
 
+def _get_sd():
+    """Lazy import sounddevice — only needed for microphone recording."""
+    import os as _os
+    import sys as _sys
+
+    if _os.name == "nt":
+        # PyInstaller bundle: add extraction temp dir to DLL search
+        if getattr(_sys, "frozen", False):
+            _bundle_dir = getattr(_sys, "_MEIPASS", "")
+            if _bundle_dir and _os.path.isdir(_bundle_dir):
+                try:
+                    _os.add_dll_directory(_bundle_dir)
+                except OSError:
+                    pass
+                _path = _os.environ.get("PATH", "")
+                if _bundle_dir not in _path:
+                    _os.environ["PATH"] = _bundle_dir + _os.pathsep + _path
+        # MSYS2 dev environment
+        _msys2_bin = r"C:\msys64\ucrt64\bin"
+        if _os.path.isdir(_msys2_bin):
+            try:
+                _os.add_dll_directory(_msys2_bin)
+            except OSError:
+                pass
+            _path = _os.environ.get("PATH", "")
+            if _msys2_bin not in _path:
+                _os.environ["PATH"] = _msys2_bin + _os.pathsep + _path
+    try:
+        import sounddevice as _sd
+    except Exception as exc:
+        raise RuntimeError(
+            "Microphone not available: PortAudio library missing. "
+            "Install portaudio or use file transcription instead."
+        ) from exc
+    return _sd
+
+
 class RecordingController:
     def __init__(self, samplerate: int = 44100, channels: int = 1) -> None:
         self.samplerate = samplerate
@@ -101,7 +137,7 @@ class RecordingController:
 
     def start(self) -> None:
         self._chunks = []
-        self._stream = sd.InputStream(
+        self._stream = _get_sd().InputStream(
             samplerate=self.samplerate,
             channels=self.channels,
             callback=self._callback,

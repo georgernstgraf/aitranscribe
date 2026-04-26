@@ -9,32 +9,32 @@ def get_audio_duration(file_path: str) -> float:
     return len(audio) / 1000.0
 
 def compress_audio(file_path: str, output_path: str | None = None) -> str:
-    """
-    Compresses the audio file (e.g. WAV) to a highly compressed MP3 format
-    to save API tokens/bandwidth. Returns the path to the compressed file.
-    """
-    audio = AudioSegment.from_file(file_path)
-    if output_path is None:
-        file_name = Path(file_path).stem
-        output_dir = Path(file_path).parent
-        output_path = str(output_dir / f"{file_name}_compressed.mp3")
-
-    # Export as mp3 at a low bitrate suitable for speech (e.g., 64k or 32k)
-    audio.export(output_path, format="mp3", bitrate="32k")
-    return output_path
+    """Compress WAV to MP3 via ffmpeg. Falls back to original file if ffmpeg is missing."""
+    try:
+        audio = AudioSegment.from_file(file_path)
+        if output_path is None:
+            file_name = Path(file_path).stem
+            output_dir = Path(file_path).parent
+            output_path = str(output_dir / f"{file_name}_compressed.mp3")
+        audio.export(output_path, format="mp3", bitrate="32k")
+        return output_path
+    except Exception:
+        # ffmpeg not available — transcription APIs accept uncompressed audio directly
+        return file_path
 
 def chunk_audio(file_path: str, max_size_mb: int = 25) -> list[str]:
-    """
-    Splits an audio file into chunks smaller than max_size_mb.
-    Returns a list of file paths to the chunks.
-    """
+    """Split audio into chunks < max_size_mb. Falls back to whole file if ffmpeg is missing."""
     file_size_mb = os.path.getsize(file_path) / (1024 * 1024)
     if file_size_mb <= max_size_mb:
         return [file_path]
 
-    # Chunk by 10-minute segments to be safe
-    audio = AudioSegment.from_file(file_path)
-    chunk_length_ms = 10 * 60 * 1000 # 10 minutes
+    try:
+        audio = AudioSegment.from_file(file_path)
+    except Exception:
+        # ffmpeg not available, return whole file (may exceed API limit)
+        return [file_path]
+
+    chunk_length_ms = 10 * 60 * 1000  # 10 minutes
     chunks = []
 
     file_name = Path(file_path).stem

@@ -16,5 +16,11 @@ android/.externalNativeBuild
 android.cxx
 android/local.properties
 
+# Build artifacts
+build/
+dist/
+*.spec
+aitranscribe.egg-info/
+
 # Symlinked skills from opencode-helpers (not tracked)
 skills/

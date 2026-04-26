@@ -1,0 +1,27 @@
+[project]
+name = "aitranscribe"
+version = "1.0.0"
+description = "TUI-first terminal app for STT and LLM post-processing via multiple providers"
+requires-python = ">=3.10"
+dependencies = [
+    "typer>=0.9.0",
+    "rich>=13.0.0",
+    "textual>=0.86.0",
+    "pydub>=0.25.1",
+    "sounddevice>=0.4.6",
+    "soundfile>=0.12.1",
+    "openai>=1.0.0",
+    "python-dotenv>=1.0.0",
+    "pynput>=1.7.6",
+    "numpy>=1.26.0",
+]
+
+[project.scripts]
+aitranscribe = "main:main_cli"
+
+[tool.setuptools]
+py-modules = ["main", "core", "tui"]
+
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"

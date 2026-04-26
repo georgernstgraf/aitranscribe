@@ -4,8 +4,6 @@ import os
 import re
 import shutil
 import typer
-import sounddevice as sd
-import soundfile as sf
 import numpy as np
 import tempfile
 import sqlite3
@@ -196,6 +194,65 @@ def _get_llm_client() -> OpenAI | None:
         api_key=api_key,
     )
 
+_MSYS2_UCRT64_BIN = r"C:\msys64\ucrt64\bin"
+
+
+def _ensure_audio_dll_path():
+    """Ensure MSYS2 UCRT64 bin directory is on PATH for DLL discovery."""
+    if os.name != "nt":
+        return
+    # PyInstaller bundle: add extraction temp dir to DLL search
+    if getattr(sys, "frozen", False):
+        bundle_dir = getattr(sys, "_MEIPASS", "")
+        if bundle_dir and os.path.isdir(bundle_dir):
+            try:
+                os.add_dll_directory(bundle_dir)
+            except OSError:
+                pass
+            path = os.environ.get("PATH", "")
+            if bundle_dir not in path:
+                os.environ["PATH"] = bundle_dir + os.pathsep + path
+    # MSYS2 dev environment: add ucrt64 bin to DLL search
+    if os.path.isdir(_MSYS2_UCRT64_BIN):
+        try:
+            os.add_dll_directory(_MSYS2_UCRT64_BIN)
+        except OSError:
+            pass
+        path = os.environ.get("PATH", "")
+        if _MSYS2_UCRT64_BIN not in path:
+            os.environ["PATH"] = _MSYS2_UCRT64_BIN + os.pathsep + path
+
+
+def _get_sd():
+    """Lazy import sounddevice — only needed for microphone recording."""
+    _ensure_audio_dll_path()
+    try:
+        import sounddevice as _sd
+    except Exception as exc:
+        raise RuntimeError(
+            "Microphone not available: PortAudio library missing. "
+            "Install portaudio or use file transcription instead."
+        ) from exc
+    return _sd
+
+
+def _write_wav(filename: str, data: "np.ndarray", samplerate: int) -> None:
+    """Write a NumPy array as a 16-bit PCM WAV file using stdlib."""
+    import wave
+
+    arr = np.asarray(data)
+    if arr.dtype.kind == "f":
+        arr = (arr * 32767).astype(np.int16)
+    elif arr.dtype != np.int16:
+        arr = arr.astype(np.int16)
+    nchannels = 1 if arr.ndim == 1 else arr.shape[1]
+    with wave.open(filename, "w") as f:
+        f.setnchannels(nchannels)
+        f.setsampwidth(2)
+        f.setframerate(samplerate)
+        f.writeframes(arr.tobytes())
+
+
 def _get_llm_model() -> str:
     if LLM_PROVIDER not in LLM_PROVIDERS:
         provider = LLM_PROVIDERS["openrouter"]
@@ -243,12 +300,18 @@ def get_tui_settings() -> dict[str, Any]:
         "verbose": str(config.get("VERBOSE_ERRORS", str(DEFAULT_VERBOSE_ERRORS))).strip().lower() in {"1", "true", "yes", "on"},
     }
 
-stt_client = OpenAI(
-    base_url="https://api.groq.com/openai/v1",
-    api_key=GROQ_API_KEY,
-) if GROQ_API_KEY and GROQ_API_KEY != "your_groq_api_key_here" else None
+try:
+    stt_client = OpenAI(
+        base_url="https://api.groq.com/openai/v1",
+        api_key=GROQ_API_KEY,
+    ) if GROQ_API_KEY and GROQ_API_KEY != "your_groq_api_key_here" else None
+except Exception:
+    stt_client = None
 
-llm_client = _get_llm_client()
+try:
+    llm_client = _get_llm_client()
+except Exception:
+    llm_client = None
 LLM_MODEL = _get_llm_model()
 
 # Option Factory Functions
@@ -652,7 +715,7 @@ def process_recorded_audio_for_tui(
 
     raw_wav_file, final_mp3_file = get_recording_file_paths(".mp3")
     samplerate = 44100
-    sf.write(raw_wav_file, audio_np, samplerate)
+    _write_wav(raw_wav_file, audio_np, samplerate)
 
     def update_feedback(step_id: str, status: str) -> None:
         if feedback_callback:
@@ -1049,7 +1112,7 @@ def record_from_microphone(stt_model: str, llm_model: str, post_process: bool, v
             if recording_state["is_recording"]:
                 audio_data.append(indata.copy())
 
-        with sd.InputStream(samplerate=samplerate, channels=channels, callback=callback):
+        with _get_sd().InputStream(samplerate=samplerate, channels=channels, callback=callback):
             start_time = None
             last_update = 0.0
             total_start_time = time.time()
@@ -1149,7 +1212,7 @@ def record_from_microphone(stt_model: str, llm_model: str, post_process: bool, v
 
     raw_wav_file, final_mp3_file = get_recording_file_paths(".mp3")
 
-    sf.write(raw_wav_file, audio_np, samplerate)
+    _write_wav(raw_wav_file, audio_np, samplerate)
 
     try:
         with Progress(
@@ -1208,5 +1271,9 @@ def record_from_microphone(stt_model: str, llm_model: str, post_process: bool, v
         if os.path.exists(raw_wav_file):
             os.remove(raw_wav_file)
 
-if __name__ == "__main__":
+def main_cli():
     app()
+
+
+if __name__ == "__main__":
+    main_cli()
