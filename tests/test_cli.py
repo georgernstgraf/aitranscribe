@@ -145,7 +145,7 @@ def test_get_post_process_prompt_english_only():
 def test_get_post_process_prompt_post_process_only():
     """Test default post-processing prompt."""
     result = get_post_process_prompt(english=False, post_process=True)
-    assert result == "Please correct grammatical errors, remove filler words, and structure the following text."
+    assert result == "Please correct grammatical errors, remove filler words, and structure the following text clearly."
 
 def test_get_post_process_prompt_none():
     """Test no post-processing."""

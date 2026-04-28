@@ -69,6 +69,12 @@ LLM_PROVIDERS = {
         "env_model": "ZAI_LLM_MODEL",
         "default_model": "glm-5",
     },
+    "google": {
+        "base_url": "https://generativelanguage.googleapis.com/v1beta/openai/",
+        "env_key": "GOOGLE_API_KEY",
+        "env_model": "GOOGLE_LLM_MODEL",
+        "default_model": "gemini-2.0-flash",
+    },
 }
 
 if os.name == 'nt':
@@ -100,6 +106,9 @@ def _create_default_config() -> None:
         f.write('\n# z.ai (alternative provider)\n')
         f.write('# ZAI_API_KEY="your_zai_api_key_here"\n')
         f.write('# ZAI_LLM_MODEL="glm-5"\n')
+        f.write('\n# Google (alternative provider)\n')
+        f.write('# GOOGLE_API_KEY="your_google_api_key_here"\n')
+        f.write('# GOOGLE_LLM_MODEL="gemini-2.0-flash"\n')
         f.write('\n# TUI Defaults\n')
         f.write('PRE_PROCESS_MODE="english"\n')
         f.write('TRANSCRIBE_SOURCE="microphone"\n')
@@ -130,6 +139,11 @@ def _migrate_config() -> None:
             f.write('\n# z.ai (alternative provider)\n')
             f.write('# ZAI_API_KEY="your_zai_api_key_here"\n')
             f.write('# ZAI_LLM_MODEL="glm-5"\n')
+    if "GOOGLE_API_KEY" not in config_text:
+        with open(CONFIG_FILE, "a") as f:
+            f.write('\n# Google (alternative provider)\n')
+            f.write('# GOOGLE_API_KEY="your_google_api_key_here"\n')
+            f.write('# GOOGLE_LLM_MODEL="gemini-2.0-flash"\n')
     if "PRE_PROCESS_MODE" not in config_text:
         with open(CONFIG_FILE, "a") as f:
             f.write('\n# TUI Defaults\n')

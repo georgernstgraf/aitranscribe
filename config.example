@@ -1,0 +1,71 @@
+# aitranscribe configuration file
+# Place this file at one of the following locations:
+#   Linux/macOS: ~/.config/aitranscribe/config
+#   Windows:     %APPDATA%\aitranscribe\config
+#
+# Or copy this file and edit the values directly.
+
+# =============================================================================
+# Speech-to-Text (STT) Provider — Currently only Groq is supported
+# =============================================================================
+
+GROQ_API_KEY="your_groq_api_key_here"
+GROQ_STT_MODEL="whisper-large-v3-turbo"
+
+# =============================================================================
+# LLM Post-Processing Provider
+# =============================================================================
+# Set LLM_PROVIDER to one of: openrouter, cohere, z.ai, google
+# The corresponding API key and model must also be configured.
+
+LLM_PROVIDER="openrouter"
+
+# ---------------------------------------------------------------------------
+# OpenRouter (default provider)
+#   Endpoint: https://openrouter.ai/api/v1
+#   Docs:     https://openrouter.ai/docs
+# ---------------------------------------------------------------------------
+OPENROUTER_API_KEY="your_openrouter_api_key_here"
+OPENROUTER_LLM_MODEL="anthropic/claude-3-haiku"
+
+# ---------------------------------------------------------------------------
+# Cohere (alternative provider)
+#   Endpoint: https://api.cohere.ai/compatibility/v1
+#   Docs:     https://docs.cohere.com/
+# ---------------------------------------------------------------------------
+# COHERE_API_KEY="your_cohere_api_key_here"
+# COHERE_LLM_MODEL="command-r"
+
+# ---------------------------------------------------------------------------
+# z.ai (alternative provider)
+#   Endpoint: https://api.z.ai/api/coding/paas/v4
+#   Docs:     https://z.ai/
+# ---------------------------------------------------------------------------
+# ZAI_API_KEY="your_zai_api_key_here"
+# ZAI_LLM_MODEL="glm-5"
+
+# ---------------------------------------------------------------------------
+# Google (alternative provider)
+#   Endpoint: https://generativelanguage.googleapis.com/v1beta/openai/
+#   Docs:     https://ai.google.dev/gemini-api/docs/openai
+#   Note:     Uses the OpenAI-compatible Gemini API. Get your API key from
+#             https://aistudio.google.com/app/apikey
+# ---------------------------------------------------------------------------
+# GOOGLE_API_KEY="your_google_api_key_here"
+# GOOGLE_LLM_MODEL="gemini-2.0-flash"
+
+# =============================================================================
+# TUI Defaults
+# =============================================================================
+
+PRE_PROCESS_MODE="english"
+TRANSCRIBE_SOURCE="microphone"
+LAST_FILE_PATH=""
+VERBOSE_ERRORS="false"
+
+# =============================================================================
+# Prompt Storage
+# =============================================================================
+# Path to the SQLite database where transcripts are stored.
+
+PROMPTS_FILE="~/.config/aitranscribe/prompts.sqlite"
