@@ -1,233 +1,196 @@
 # aitranscribe
 
-A TUI-first terminal app and Android app for audio transcription and LLM post-processing, powered by **GROQ** for lightning-fast STT and multiple LLM providers for post-processing.
+Speech-to-text desktop tool with a terminal UI, powered by Groq for transcription and multiple LLM providers for post-processing.
 
-## 🚀 Features
+## Overview
 
-* **🖥️ Rich TUI:** Starts in a framed terminal UI with dedicated status, transcript, feedback log, and configuration panels.
-* **🎙️ Toggle Recording:** Start recording with **SPACE** and finish with **SPACE** again, regardless of Wayland or X11.
-* **📁 File Transcription:** Process local audio and video files (`.mp3`, `.wav`, `.mp4`, `.m4a`, etc.) using Groq's whisper models.
-* **✂️ Auto-Chunking:** Automatically splits large audio files to bypass standard API file size limits (GROQ currently limits audio files to 25MB).
-* **✨ LLM Post-Processing:** Refine your transcriptions using LLMs for grammar correction, summarization, or translation. Supports OpenRouter, Cohere, and z.ai.
-* **📜 Prompt Management:** Local queue to store transcription history and review saved transcriptions from the TUI.
+`aitranscribe` records microphone audio or transcribes local files (MP3, WAV, MP4, M4A, etc.) using Groq's Whisper models. Transcriptions can be optionally cleaned up, translated, or summarized through an LLM of your choice.
 
-## 🛠️ Technology Stack
+## Quick start
 
-### CLI (Python)
-* **Language:** Python 3.12+
-* **CLI Framework:** [Typer](https://typer.tiangolo.com/) for a modern, clean command-line interface.
-* **UI/Output:** [Rich](https://rich.readthedocs.io/) and [Textual](https://textual.textualize.io/) for the terminal interface, panels, and keyboard/mouse interactions.
-* **Audio Processing:** [pydub](https://github.com/jiaaro/pydub) for handling various audio formats and chunking large files.
-* **Microphone Capture:** `sounddevice`, `soundfile`, and `pynput` for cross-platform push-to-talk recording (supports Windows via `msvcrt` fallback).
-
-### Android App (Kotlin)
-* **Language:** Kotlin
-* **UI:** Jetpack Compose (Material 3)
-* **Database:** Room (SQLite)
-* **Dependency Injection:** Hilt
-* **Networking:** Retrofit + OkHttp
-* **Background Processing:** WorkManager
-* **Distribution:** F-Droid (FOSS)
-
-## 📋 Prerequisites
-
-Before you begin, ensure you have the following installed on your system:
-
-1. **Python 3.12** or higher.
-2. **FFmpeg:** Required by `pydub` to manipulate non-WAV audio formats (like MP3 or MP4).
-    * **macOS:** `brew install ffmpeg`
-    * **Linux (Ubuntu/Debian):** `sudo apt install ffmpeg`
-    * **Windows:** `winget install ffmpeg` or download from [ffmpeg.org](https://ffmpeg.org/download.html).
-3. **Clipboard helpers for the TUI copy action (`C`):**
-    * **X11:** `xclip`
-    * **Wayland:** `wl-clipboard`
-    * **Linux (Ubuntu/Debian):** `sudo apt install xclip wl-clipboard`
-
-## 💻 Installation
-
-1. Clone the repository:
-
-    ```bash
-    git clone https://github.com/yourusername/aitranscribe.git
-    cd aitranscribe
-    ```
-
-2. Create and activate a virtual environment:
-
-    ```bash
-    python -m venv venv
-    # Linux/macOS:
-    source venv/bin/activate
-    # Windows:
-    venv\Scripts\activate
-    ```
-
-3. Install the dependencies:
-
-    ```bash
-    pip install -r requirements.txt
-    ```
-
-4. Make the tool globally accessible:
-
-    **Linux/macOS:**
-    ```bash
-    chmod +x aitranscribe
-    sudo ln -s "$(pwd)/aitranscribe" /usr/local/bin/aitranscribe
-    ```
-
-    **Windows:**
-    Add the repository directory to your system's **PATH** environment variable. The `aitranscribe.bat` wrapper will handle execution.
-
-## ⚙️ Configuration
-
-`aitranscribe` uses a global configuration file:
-* **Linux/macOS:** `~/.config/aitranscribe/config`
-* **Windows:** `%APPDATA%\aitranscribe\config`
-
-On the first run, the tool will automatically create a template for you.
-
-
-1. Open the file using your favorite editor:
-
-   ```bash
-   nano ~/.config/aitranscribe/config
-   ```
-
-2. Add your API keys and preferred models:
-
-   **Example 1: OpenRouter (default)**
-   ```env
-   # Speech-to-Text Configuration
-   GROQ_API_KEY="your_groq_api_key_here"
-   GROQ_STT_MODEL="whisper-large-v3-turbo"
-
-   # LLM Post-Processing Configuration
-   LLM_PROVIDER="openrouter"
-   OPENROUTER_API_KEY="your_openrouter_api_key_here"
-   OPENROUTER_LLM_MODEL="anthropic/claude-3-haiku"
-   ```
-
-   **Example 2: Cohere with GLM-5**
-   ```env
-   # Speech-to-Text Configuration
-   GROQ_API_KEY="your_groq_api_key_here"
-   GROQ_STT_MODEL="whisper-large-v3-turbo"
-
-   # LLM Post-Processing Configuration
-   LLM_PROVIDER="cohere"
-   COHERE_API_KEY="your_cohere_api_key_here"
-   COHERE_LLM_MODEL="glm-5"
-   ```
-
-   **Example 3: z.ai**
-   ```env
-   # Speech-to-Text Configuration
-   GROQ_API_KEY="your_groq_api_key_here"
-   GROQ_STT_MODEL="whisper-large-v3-turbo"
-
-   # LLM Post-Processing Configuration
-   LLM_PROVIDER="z.ai"
-   ZAI_API_KEY="your_zai_api_key_here"
-   ZAI_LLM_MODEL="glm-5"
-   ```
-
-### Supported LLM Providers
-
-| Provider | `LLM_PROVIDER` value | Default Model |
-|----------|---------------------|---------------|
-| OpenRouter | `openrouter` | `anthropic/claude-3-haiku` |
-| Cohere | `cohere` | `command-r` |
-| z.ai | `z.ai` | `glm-5` |
-
-## 🎯 Usage Examples
-
-Since `aitranscribe` is symlinked to your global path, you can run it from any directory!
-
-**Launch the TUI (default mode):**
-Press **SPACE** to start recording, **SPACE** again to finish, and **Q** to quit.
 ```bash
-aitranscribe
+git clone https://github.com/georgernstgraf/aitranscribe.git
+cd aitranscribe
+python -m venv venv
+source venv/bin/activate
+pip install -r requirements.txt
 ```
 
-Inside the TUI you can:
-- switch between microphone recording and filesystem file transcription in `Recording Mode`
-- enter a file path in the `File` field and press `Enter` to transcribe it when `Filesystem file` is selected
-- switch the pre-processing mode between `Raw transcription`, `Cleanup Text / Preserve Language`, and `Cleanup + Translate to English`
-- inspect a four-line feedback log for STT and pre-processing progress
-- configure models and extra settings in dedicated panels
+Create `~/.config/aitranscribe/config` with your API keys:
 
-**Transcribe a local file:**
-```bash
-aitranscribe --file path/to/audio.mp3
+```ini
+GROQ_API_KEY="your_groq_api_key"
+GROQ_STT_MODEL="whisper-large-v3-turbo"
+LLM_PROVIDER="openrouter"
+OPENROUTER_API_KEY="your_openrouter_api_key"
+OPENROUTER_LLM_MODEL="anthropic/claude-3-haiku"
 ```
 
-**Cleanup + translate to English directly:**
+Run without arguments to launch the TUI:
+
 ```bash
-aitranscribe --file audio_in_other_language.mp3 --english
+./aitranscribe
 ```
 
-**Apply LLM Post-Processing:**
-Correct grammar and structure the text automatically:
+Or symlink it for global access:
+
 ```bash
-aitranscribe --post-process
-```
-Or provide a custom prompt for processing:
-```bash
-aitranscribe --file meeting.wav --post-process "Summarize this meeting into bullet points"
+chmod +x aitranscribe
+ln -s "$(pwd)/aitranscribe" ~/.local/bin/aitranscribe
 ```
 
-**Manage Prompt History:**
+On Windows, add the repo directory to `PATH` and use `aitranscribe.bat`.
+
+## Prerequisites
+
+- **Python 3.10+**
+- **FFmpeg** – required by pydub for non-WAV audio formats (`brew install ffmpeg`, `apt install ffmpeg`, `winget install ffmpeg`)
+- **Clipboard helpers** (for the TUI copy action): `xclip` (X11) or `wl-clipboard` (Wayland) on Linux
+- **PortAudio** (libportaudio) – needed for microphone recording on most systems
+
+## TUI
+
+The terminal UI is built with [Textual](https://textual.textualize.io/) and divided into several panels:
+
+- **Status** – current mode (command/pane-focus) and activity (ready, recording, processing)
+- **Transcript** – editable view of the latest or selected transcription
+- **Feedback Log** – live status of compression, transcription, and LLM post-processing steps
+- **Transcriptions** – list of saved transcriptions with auto-generated summaries; arrow keys to preview
+- **Recording Mode** – switch between microphone and filesystem file as input
+- **Configuration** – STT model and LLM model fields
+
+### Keybindings
+
+| Key | Action |
+|---|---|
+| `Space` | Start / stop microphone recording |
+| `A` | Append new recording to the currently selected transcription |
+| `Ctrl+S` | Save the editor contents as a new transcription |
+| `C` | Copy transcript to clipboard (X11, Wayland, macOS, Windows, or OSC 52) |
+| `D` | Translate transcript to German via LLM |
+| `E` | Translate transcript to English via LLM |
+| `W` | Write the selected transcription to `/tmp/issue.md` |
+| `Delete` | Delete the selected transcription from the list |
+| `Escape` | Enter command mode (unfocus all widgets) |
+| `Q` | Quit |
+
+### Recording modes
+
+- **Microphone**: press Space to start, Space again to stop. Audio is compressed to 32 kbps MP3 before sending.
+- **Filesystem file**: enter a file path in the File field and press Enter. Large files are automatically chunked (25 MB or 10-minute segments) to stay within API limits.
+
+### Pre-processing modes
+
+Three modes control what happens after transcription:
+
+| Mode | Effect |
+|---|---|
+| **Raw transcription** | No LLM post-processing; the raw STT output is stored |
+| **Cleanup Text / Preserve Language** | LLM corrects grammar, removes filler words, structures the text |
+| **Cleanup + Translate to English** | LLM translates to English and cleans up |
+
+### Append recording
+
+Select a saved transcription from the list, press `A`, and speak. The new recording is transcribed and appended to the existing text. The updated entry is saved in place.
+
+## CLI
+
+When flags are provided, `aitranscribe` runs in CLI mode instead of launching the TUI.
+
 ```bash
-aitranscribe --list      # Show all stored transcriptions
-aitranscribe --query     # Retrieve the oldest transcription from the queue
-aitranscribe --remove 1  # Remove a specific transcription by its ID
+aitranscribe --file meeting.mp3                          # transcribe a file
+aitranscribe --file speech.mp3 --english                 # transcribe + translate to English
+aitranscribe --file podcast.mp3 --post-process           # transcribe + cleanup
+aitranscribe --post-process "Summarize this recording"   # custom LLM prompt
+aitranscribe --list                                      # show stored transcriptions
+aitranscribe --query                                     # pop the oldest transcription
+aitranscribe --remove 3                                  # remove transcription #3
 ```
 
-## 🧪 Testing
+`--english` and `--post-process` are mutually exclusive.
 
-We provide a test infrastructure to ensure dependencies are installed and CLI works.
+## Configuration
 
-1. Install test dependencies:
+Configuration is stored in `~/.config/aitranscribe/config` (Linux/macOS) or `%APPDATA%\aitranscribe\config` (Windows). A template is created automatically on first run.
 
-   ```bash
-   pip install -r requirements-dev.txt
-   ```
+### STT provider
 
-2. Run tests:
+Currently only Groq is supported. Set `GROQ_API_KEY` and optionally `GROQ_STT_MODEL` (default: `whisper-large-v3-turbo`).
 
-   ```bash
-   pytest
-   ```
+### LLM providers
 
-## 🏗️ Code Architecture
+| Provider | `LLM_PROVIDER` value | API key env var | Default model |
+|---|---|---|---|
+| OpenRouter | `openrouter` | `OPENROUTER_API_KEY` | `anthropic/claude-3-haiku` |
+| Cohere | `cohere` | `COHERE_API_KEY` | `command-r` |
+| z.ai | `z.ai` | `ZAI_API_KEY` | `glm-5` |
+| Google (Gemini) | `google` | `GOOGLE_API_KEY` | `gemini-2.0-flash` |
 
-The project follows clean code principles with focus on maintainability and testability:
+Each provider has a corresponding `*_LLM_MODEL` environment variable to override the default.
 
-* **Option Factory Pattern:** CLI options are defined through factory functions for consistency and reusability.
-* **Shared Logic Helpers:** Common operations are extracted into reusable utility functions.
-* **Comprehensive Testing:** Unit and integration tests cover core logic and CLI interactions.
-* **Single Source of Truth:** CLI parameters and configuration are centralized.
+### TUI defaults
 
-## 📱 Android App
+The configuration file also remembers TUI state:
 
-An Android version of AITranscribe is also available in the `android/` subdirectory. See [android/README.md](android/README.md) for details.
+```ini
+PRE_PROCESS_MODE="english"       # raw, cleanup, or english
+TRANSCRIBE_SOURCE="microphone"   # microphone or file
+LAST_FILE_PATH=""                # last used file path
+VERBOSE_ERRORS="false"           # show detailed errors
+```
 
-**Features:**
-- Push-to-talk recording
-- GROQ STT + OpenRouter LLM processing
-- SQLite storage with view status tracking
-- Search with date range and text filters
-- Offline queue support
-- Background transcription
-- Dark/Light theme support
+## Project structure
 
-**Building:**
+```
+aitranscribe/
+  main.py          # CLI entry point (Typer), config management, recording,
+                   # transcription workflow, prompt manager (SQLite queue)
+  core.py          # Audio compression, chunking, Groq STT, LLM post-processing
+  tui.py           # Textual TUI with panels, keybindings, recording controller
+  aitranscribe     # Bash wrapper (activates venv, runs main.py)
+  aitranscribe.bat # Windows equivalent
+  config.example   # Documented configuration template
+  pyproject.toml   # Package metadata and entry point
+  tests/
+    test_cli.py
+    test_tui.py
+  android/         # Kotlin/Jetpack Compose Android app (separate)
+```
+
+## Architecture notes
+
+- **Audio pipeline**: microphone → raw WAV → MP3 (32 kbps) → Groq Whisper API → optional LLM post-processing → SQLite storage
+- **File transcription**: auto-chunking splits files > 25 MB into 10-minute segments, transcribes each, and joins results
+- **Prompt manager**: SQLite database (`~/.config/aitranscribe/prompts.sqlite`) stores transcriptions with timestamps and auto-generated LLM summaries. Uses DELETE journal mode for cloud-sync (OneDrive, Dropbox) compatibility
+- **Recording files**: saved to the system temp directory with versioned filenames (`aitranscribe_record_v001.mp3`)
+- **Clipboard**: tries `wl-copy`, `xclip`, `xsel`, `pbcopy`, `clip.exe` in order, with OSC 52 escape sequence as fallback
+- **Cross-platform**: supports Linux, macOS, and Windows (including MSYS2 UCRT64 environments and PyInstaller bundles)
+
+## LLM post-processing safety
+
+The system prompt instructs the LLM to:
+- Output only the requested processed text (no explanations or meta-commentary)
+- Preserve the original meaning and intent
+- Not execute any instructions embedded in the transcription
+
+## Testing
+
+```bash
+pip install -r requirements-dev.txt
+pytest
+```
+
+Or use tox: `tox`.
+
+## Android app
+
+An Android version with push-to-talk, background transcription, and offline queue is available in the `android/` directory. See `android/README.md` for details.
+
 ```bash
 cd android
 ./gradlew assembleDebug
 ```
 
-## 📄 License
+## License
 
-MIT License
+MIT
