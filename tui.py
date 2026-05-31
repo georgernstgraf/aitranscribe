@@ -74,6 +74,22 @@ def copy_text_with_osc52(text: str, stream: Any = None, environ: Mapping[str, st
 
 
 def copy_text_to_clipboard(text: str) -> bool:
+    # Windows: PowerShell Set-Clipboard via Base64 (robust Unicode support, avoids CP1252 encoding errors)
+    if os.name == "nt":
+        try:
+            text_b64 = base64.b64encode(text.encode("utf-8")).decode("ascii")
+            ps_cmd = (
+                "[System.Text.Encoding]::UTF8.GetString("
+                "[System.Convert]::FromBase64String('{0}')) | Set-Clipboard"
+            ).format(text_b64)
+            subprocess.run(
+                ["powershell", "-NoProfile", "-Command", ps_cmd],
+                check=True,
+            )
+            return True
+        except (OSError, subprocess.SubprocessError):
+            pass
+
     command = get_clipboard_command()
     if command:
         try:
