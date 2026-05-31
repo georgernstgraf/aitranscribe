@@ -9,18 +9,14 @@ def get_audio_duration(file_path: str) -> float:
     return len(audio) / 1000.0
 
 def compress_audio(file_path: str, output_path: str | None = None) -> str:
-    """Compress WAV to MP3 via ffmpeg. Falls back to original file if ffmpeg is missing."""
-    try:
-        audio = AudioSegment.from_file(file_path)
-        if output_path is None:
-            file_name = Path(file_path).stem
-            output_dir = Path(file_path).parent
-            output_path = str(output_dir / f"{file_name}_compressed.mp3")
-        audio.export(output_path, format="mp3", bitrate="32k")
-        return output_path
-    except Exception:
-        # ffmpeg not available — transcription APIs accept uncompressed audio directly
-        return file_path
+    """Compress WAV to MP3 via ffmpeg. Raises if ffmpeg is not available."""
+    audio = AudioSegment.from_file(file_path)
+    if output_path is None:
+        file_name = Path(file_path).stem
+        output_dir = Path(file_path).parent
+        output_path = str(output_dir / f"{file_name}_compressed.mp3")
+    audio.export(output_path, format="mp3", bitrate="32k")
+    return output_path
 
 def chunk_audio(file_path: str, max_size_mb: int = 25) -> list[str]:
     """Split audio into chunks < max_size_mb. Falls back to whole file if ffmpeg is missing."""
@@ -28,11 +24,7 @@ def chunk_audio(file_path: str, max_size_mb: int = 25) -> list[str]:
     if file_size_mb <= max_size_mb:
         return [file_path]
 
-    try:
-        audio = AudioSegment.from_file(file_path)
-    except Exception:
-        # ffmpeg not available, return whole file (may exceed API limit)
-        return [file_path]
+    audio = AudioSegment.from_file(file_path)
 
     chunk_length_ms = 10 * 60 * 1000  # 10 minutes
     chunks = []

@@ -321,18 +321,16 @@ def get_tui_settings() -> dict[str, Any]:
         "verbose": str(config.get("VERBOSE_ERRORS", str(DEFAULT_VERBOSE_ERRORS))).strip().lower() in {"1", "true", "yes", "on"},
     }
 
-try:
-    stt_client = OpenAI(
+stt_client = (
+    OpenAI(
         base_url="https://api.groq.com/openai/v1",
         api_key=GROQ_API_KEY,
-    ) if GROQ_API_KEY and GROQ_API_KEY != "your_groq_api_key_here" else None
-except Exception:
-    stt_client = None
+    )
+    if GROQ_API_KEY and GROQ_API_KEY != "your_groq_api_key_here"
+    else None
+)
 
-try:
-    llm_client = _get_llm_client()
-except Exception:
-    llm_client = None
+llm_client = _get_llm_client()
 LLM_MODEL = _get_llm_model()
 
 # Option Factory Functions
@@ -394,7 +392,7 @@ def get_next_recording_version(temp_dir: str) -> int:
                 if version > max_v:
                     max_v = version
     except OSError:
-        pass
+        console.print(f"Warning: Could not read temp directory {temp_dir}. Using version 1.")
     return max_v + 1
 
 
@@ -811,6 +809,7 @@ def process_file_for_tui(
         shutil.copy2(source_file, working_file)
         file_for_processing = working_file
     except Exception:
+        console.print(f"Warning: Could not copy file to temp directory. Using original file: {source_file}")
         file_for_processing = source_file
 
     def update_feedback(step_id: str, status: str) -> None:
@@ -1115,7 +1114,7 @@ def record_from_microphone(stt_model: str, llm_model: str, post_process: bool, v
             new_settings[6][termios.VTIME] = 0
             termios.tcsetattr(fd, termios.TCSADRAIN, new_settings)
         except (ImportError, Exception):
-            pass
+            console.print("Warning: Could not set up raw keyboard mode. Fallback may behave differently.")
 
     if listener is None:
         if os.name == 'nt' or fd is not None:
@@ -1214,7 +1213,7 @@ def record_from_microphone(stt_model: str, llm_model: str, post_process: bool, v
                     termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
                     termios.tcflush(fd, termios.TCIFLUSH)
                 except Exception:
-                    pass
+                    console.print("Error: Could not restore terminal settings. Your terminal may behave unexpectedly.")
         else:
             # Windows: Flush input buffer
             try:
@@ -1222,7 +1221,7 @@ def record_from_microphone(stt_model: str, llm_model: str, post_process: bool, v
                 while msvcrt.kbhit():
                     msvcrt.getch()
             except Exception:
-                pass
+                console.print("Warning: Could not flush input buffer.")
 
     if not audio_data:
         console.print("No audio recorded. Exiting.")

@@ -12,6 +12,7 @@ import numpy as np
 from rich.text import Text
 from textual.app import App, ComposeResult
 from textual.binding import Binding
+from textual.screen import ModalScreen
 from textual.containers import Horizontal, Vertical
 from textual.events import Resize
 from textual.message import Message
@@ -174,6 +175,64 @@ class RecordingController:
         audio = np.concatenate(self._chunks, axis=0)
         self._chunks = []
         return audio
+
+
+class ErrorDialog(ModalScreen[None]):
+    DEFAULT_CSS = """
+    ErrorDialog {
+        align: center middle;
+    }
+    #error-dialog {
+        width: 60;
+        height: auto;
+        max-height: 80%;
+        padding: 1 2;
+        border: thick $error;
+        background: $surface;
+    }
+    #error-title {
+        text-style: bold;
+        color: $error;
+        padding-bottom: 1;
+        height: 3;
+    }
+    #error-message {
+        padding-bottom: 1;
+        height: auto;
+    }
+    #error-detail {
+        padding: 1;
+        border: solid $border;
+        max-height: 20;
+        min-height: 3;
+        overflow-y: auto;
+        margin-bottom: 1;
+    }
+    #error-button {
+        width: 100%;
+    }
+    """
+
+    def __init__(self, title: str, message: str, detail: str = "", fatal: bool = False):
+        super().__init__()
+        self.error_title = title
+        self.error_message = message
+        self.error_detail = detail
+        self.fatal = fatal
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="error-dialog"):
+            yield Label(self.error_title, id="error-title")
+            yield Static(self.error_message, id="error-message")
+            if self.error_detail:
+                yield Static(self.error_detail, id="error-detail")
+            yield Button("OK", variant="error", id="error-button")
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if self.fatal:
+            self.app.exit()
+        else:
+            self.dismiss()
 
 
 class AitranscribeTUI(App[None]):
@@ -694,7 +753,12 @@ class AitranscribeTUI(App[None]):
         try:
             self.recorder.start()
         except Exception as exc:
-            self.set_status_message(f"Could not start recording: {exc}")
+            self.push_screen(ErrorDialog(
+                title="Recording Failed",
+                message=f"Could not start recording.",
+                detail=str(exc),
+                fatal=False,
+            ))
             self.refresh_status()
             return
 
@@ -826,6 +890,11 @@ class AitranscribeTUI(App[None]):
         self.latest_file_path = None
         retry_hint = "Press Space to try again." if self.input_source == "microphone" else "Press Enter on File to try again."
         self.set_status_message(f"Processing failed. {retry_hint}")
+        self.push_screen(ErrorDialog(
+            title="Processing Failed",
+            message=f"{error_message}\n\n{retry_hint}",
+            fatal=False,
+        ))
         self.refresh_feedback()
         self.refresh_transcript()
         self.refresh_status()
@@ -951,6 +1020,14 @@ class AitranscribeTUI(App[None]):
             self.set_status_message("Copied transcript to clipboard.")
         else:
             self.set_status_message("Clipboard copy unavailable in this session.")
+            self.push_screen(ErrorDialog(
+                title="Clipboard Unavailable",
+                message="Could not copy transcript to clipboard.\n\n"
+                        "Install xclip or xsel:\n"
+                        "  sudo apt install xclip",
+                detail="All clipboard methods failed (xclip, xsel, OSC52).",
+                fatal=False,
+            ))
         self.refresh_status()
 
     def action_write_issue(self) -> None:

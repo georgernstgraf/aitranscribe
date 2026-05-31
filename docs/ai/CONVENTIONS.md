@@ -35,6 +35,15 @@ Follow these without question. Do not deviate unless explicitly told.
 - Exception: Filesystem file selection stays in pane mode so the user can enter the file path.
 - Call `action_enter_command_mode()` after the action completes, not instantly on click.
 
+## Error Handling
+- Never use `pass` in an `except` block — exceptions must always be user-visible.
+- In TUI mode, use `ErrorDialog(title, message, detail, fatal)` for errors the user must acknowledge.
+  - `fatal=True`: config/setup errors → app exits after OK.
+  - `fatal=False`: transient errors (network, transcription) → app continues.
+- In CLI mode, use `console.print()` for warnings/errors.
+- In `core.py` library functions, let exceptions propagate to callers who decide the UI treatment.
+- Windows-only DLL path additions (`os.add_dll_directory`) are exempt — they are expected failures on non-Windows.
+
 ## Testing
 - Cover TUI integration points from the CLI layer with focused unit tests instead of trying to run an interactive terminal session in `pytest`.
 - Add focused unit tests for clipboard fallback helpers and TUI state-selection behavior instead of trying to verify them through live terminal automation.
