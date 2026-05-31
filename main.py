@@ -75,6 +75,12 @@ LLM_PROVIDERS = {
         "env_model": "GOOGLE_LLM_MODEL",
         "default_model": "gemini-2.0-flash",
     },
+    "groq": {
+        "base_url": "https://api.groq.com/openai/v1",
+        "env_key": "GROQ_API_KEY",
+        "env_model": "GROQ_LLM_MODEL",
+        "default_model": "llama-3.3-70b-versatile",
+    },
 }
 
 if os.name == 'nt':
@@ -114,7 +120,8 @@ def _create_default_config() -> None:
         f.write('TRANSCRIBE_SOURCE="microphone"\n')
         f.write('LAST_FILE_PATH=""\n')
         f.write('VERBOSE_ERRORS="false"\n')
-        f.write(f'\nPROMPTS_FILE="{PROMPTS_FILE}"\n')
+        # Single quotes to avoid dotenv escape handling of \a, \b, \f, \n, etc.
+        f.write(f"\nPROMPTS_FILE='{PROMPTS_FILE}'\n")
     console.print(f"Created configuration at {CONFIG_FILE}")
     console.print("Please edit this file to add your API keys before running the tool.")
 
