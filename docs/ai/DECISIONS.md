@@ -129,6 +129,18 @@ Each entry documents WHAT was decided and WHY.
 - **Considered**: Adding a logging module (stdlib or loguru), using `stderr` prints, keeping existing silent catch.
 - **Tradeoff**: `core.py` functions no longer silently fall back on ffmpeg failure; the exception propagates to the caller which shows a dialog. Setup errors (missing ffmpeg, invalid API keys) abort the app with a clear message where before they silently degraded.
 
+## 2026-06-11: Move LLM Prompts To Configurable prompts.toml
+- **Choice**: Extract all LLM prompt strings into `~/.config/aitranscribe/prompts.toml` (TOML format), auto-created from embedded defaults, with strict validation at startup.
+- **Reason**: Hardcoded prompt strings in Python source require code changes to customize. The TOML format supports multiline strings natively, is human-editable, and `tomllib` is stdlib since Python 3.11 (no extra deps).
+- **Considered**: YAML (requires PyYAML dep), JSON (poor multiline support), extending dotenv config (no multiline support).
+- **Tradeoff**: Adds a second config file alongside the existing dotenv config, but TOML is purpose-built for this use case and the separation keeps API keys and prompt text in their natural formats.
+
+## 2026-06-11: Adopt polished-recognition Prompt Structure
+- **Choice**: Use separate system prompt (constraints only) and user message (task instruction + data) with a translation sub-template injected into the user message via `{{translate}}` placeholder.
+- **Reason**: The polished-recognition project demonstrated a cleaner structure: system contains rules, user contains the task description and data, and translation is a sub-template resolved before injection. This always produces exactly 2 messages to the LLM.
+- **Considered**: Appending the user's request to the system prompt (old pattern), or sending 3 messages (system, task, data).
+- **Tradeoff**: Three different message builders are needed (post_process, summary, translate), but each is simple and the assembly logic is clear.
+
 ## 2026-03-11: Make Sidebar History Fill Remaining Height And Re-Refresh After Mount
 - **Choice**: Let the `Transcriptions` panel consume the remaining sidebar height with `height: 1fr` while `Recording Mode` and `Configuration` stay auto-sized, and trigger a second history refresh after the first layout pass on startup.
 - **Reason**: The right column should mirror the left column's behavior, and startup history previews need the same stable width calculation that later refreshes already use.

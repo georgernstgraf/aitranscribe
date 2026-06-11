@@ -26,10 +26,12 @@ try:
         list_prompts_option,
         query_prompt_option,
         remove_prompt_option,
-        get_post_process_prompt,
+        get_pre_process_prompt,
         validate_api_keys,
         wrap_text,
-        get_pre_process_prompt,
+        build_post_process_messages,
+        build_summary_messages,
+        build_translate_messages,
         get_recording_file_paths,
         get_tui_settings,
         launch_tui,
@@ -38,6 +40,7 @@ try:
         CONFIG_FILE,
         stt_client,
         llm_client,
+        PROMPTS,
         PromptManager,
     )
 except ImportError as e:
@@ -135,32 +138,55 @@ def test_remove_prompt_option():
 
 # ==================== Logic Helper Tests ====================
 
-def test_get_post_process_prompt_english_only():
-    """Test English translation prompt."""
-    result = get_post_process_prompt(english=True, post_process=False)
-    assert result is not None
-    assert "Please translate the following text to English" in result
-    assert "correct grammatical errors" in result
+def test_build_post_process_messages_cleanup_only():
+    """Test post-process messages without translation target."""
+    messages = build_post_process_messages("Hello world", target_language=None)
+    assert len(messages) == 2
+    assert messages[0]["role"] == "system"
+    assert messages[1]["role"] == "user"
+    assert "Hello world" in messages[1]["content"]
+    assert "correct grammatical errors" in messages[1]["content"]
+    assert "{{translate}}" not in messages[1]["content"]
+    assert "{{target_language}}" not in messages[1]["content"]
 
-def test_get_post_process_prompt_post_process_only():
-    """Test default post-processing prompt."""
-    result = get_post_process_prompt(english=False, post_process=True)
-    assert result == "Please correct grammatical errors, remove filler words, and structure the following text clearly."
 
-def test_get_post_process_prompt_none():
-    """Test no post-processing."""
-    result = get_post_process_prompt(english=False, post_process=False)
-    assert result is None
+def test_build_post_process_messages_with_translate():
+    """Test post-process messages with translation target."""
+    messages = build_post_process_messages("Hallo Welt", target_language="English")
+    assert len(messages) == 2
+    assert "Hallo Welt" in messages[1]["content"]
+    assert "correct grammatical errors" in messages[1]["content"]
+    assert "English" in messages[1]["content"]
+    assert "{{translate}}" not in messages[1]["content"]
+
+
+def test_build_summary_messages():
+    """Test summary messages construction."""
+    messages = build_summary_messages("A long transcript")
+    assert len(messages) == 2
+    assert messages[0]["role"] == "system"
+    assert messages[1]["role"] == "user"
+    assert "A long transcript" in messages[1]["content"]
+    assert "summary" in messages[1]["content"].lower()
+
+
+def test_build_translate_messages():
+    """Test standalone translation messages."""
+    messages = build_translate_messages("Guten Tag", target_language="English")
+    assert len(messages) == 2
+    assert "Guten Tag" in messages[1]["content"]
+    assert "Translate" in messages[1]["content"]
+    assert "English" in messages[1]["content"]
+    assert "{{target_language}}" not in messages[1]["content"]
+
 
 def test_get_pre_process_prompt_modes():
     """Test TUI preprocessing mode mapping."""
     assert get_pre_process_prompt("raw") is None
     cleanup_prompt = get_pre_process_prompt("cleanup")
     english_prompt = get_pre_process_prompt("english")
-    assert cleanup_prompt is not None
-    assert english_prompt is not None
-    assert "correct grammatical errors" in cleanup_prompt
-    assert "translate the following text to English" in english_prompt
+    assert cleanup_prompt is None
+    assert english_prompt == "English"
 
 def test_get_recording_file_paths_uses_three_digits():
     """Test temp recording filenames use 3-digit versions."""

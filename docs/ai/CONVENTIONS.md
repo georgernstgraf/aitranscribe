@@ -4,14 +4,17 @@ Coding patterns, naming rules, and style agreements for this project.
 Follow these without question. Do not deviate unless explicitly told.
 
 ## Naming
-- Keep TUI preprocessing modes centralized in `PRE_PROCESS_MODES` and derive prompt text from that mapping instead of duplicating strings.
-- Keep user-facing labels for preprocessing modes identical between `PRE_PROCESS_MODES`, the `Recording Mode` radio buttons, and README/help text.
+- LLM prompts are stored in `~/.config/aitranscribe/prompts.toml` (TOML format). All prompt text is configurable; the file is auto-created from embedded defaults if missing.
+- Use `{{variable}}` double-mustache placeholders in prompt templates, resolved via `str.replace()`.
+- Keep user-facing labels for preprocessing modes identical between the `Recording Mode` radio buttons and README/help text.
 
 ## File Layout
 - Keep the `Textual` UI in `tui.py` and keep API, recording, and persistence helpers in `main.py` until a larger refactor is requested.
 
 ## API Patterns
 - For TUI-triggered transcription work, send progress through the four high-level feedback IDs `compress`, `transcribe`, `post_process`, and `summary`, and use a separate transcript callback to surface raw STT text before post-processing finishes.
+- `process_with_llm(client, messages, llm_model)` accepts pre-built `messages: list[dict]` and does not construct prompts internally. Use `build_post_process_messages`, `build_summary_messages`, or `build_translate_messages` to assemble messages before calling it.
+- The translation sub-template (`{{translate}}` in the post_process user template) is resolved before injection — when no translation is requested, the placeholder is replaced with an empty string, keeping exactly 2 messages to the LLM.
 
 ## Database
 - Keep prompt summaries nullable in SQLite and migrate older `prompts` tables in place by adding `summary` instead of rebuilding the whole database when only that column is missing.

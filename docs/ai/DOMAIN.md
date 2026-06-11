@@ -7,6 +7,10 @@ Business rules and domain relationships not obvious from code.
 - transcription summary: nullable 70-80 character LLM-generated preview text stored alongside a saved transcription for history-list display.
 
 ## Rules
+- LLM prompts are stored in `~/.config/aitranscribe/prompts.toml` with 4 top-level sections: `[system]` (constraints), `[post_process]` (cleanup + optional translate sub-template), `[summary]`, and `[translate]` (standalone).
+- The post_process user template contains `{{translate}}` which is resolved to either the translated `[post_process.translate]` prompt or an empty string, keeping exactly 2 messages per LLM request.
+- All 5 required prompt keys (`system.prompt`, `post_process.user.template`, `post_process.translate.prompt`, `summary.user.template`, `translate.user.template`) must be present and non-empty in prompts.toml or the program exits with an error.
+- If `prompts.toml` does not exist, it is auto-created from `_DEFAULT_PROMPTS_TOML` (embedded in `main.py`).
 - The TUI transcript panel should show only the final displayed result, so when preprocessing runs the post-processed text replaces the raw transcript in the main transcript view.
 - Saved transcription history includes all stored entries, and queue storage is always on for TUI-triggered transcriptions.
 - The `Transcriptions` pane is the primary browser for saved history and should expose the full database in reverse chronological order.
