@@ -44,7 +44,7 @@ On Windows, add the repo directory to `PATH` and use `aitranscribe.bat`.
 ## Prerequisites
 
 - **Python 3.10+**
-- **FFmpeg** – required by pydub for non-WAV audio formats (`brew install ffmpeg`, `apt install ffmpeg`, `winget install ffmpeg`)
+- **FFmpeg** – required for audio compression and chunking (`brew install ffmpeg`, `apt install ffmpeg`, `winget install ffmpeg`)
 - **Clipboard helpers** (for the TUI copy action): `xclip` (X11) or `wl-clipboard` (Wayland) on Linux
 - **PortAudio** (libportaudio) – needed for microphone recording on most systems
 

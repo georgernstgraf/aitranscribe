@@ -7,7 +7,6 @@ dependencies = [
     "typer>=0.9.0",
     "rich>=13.0.0",
     "textual>=0.86.0",
-    "pydub>=0.25.1",
     "sounddevice>=0.4.6",
     "soundfile>=0.12.1",
     "openai>=1.0.0",
