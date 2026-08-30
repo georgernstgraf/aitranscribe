@@ -18,6 +18,8 @@ Follow these without question. Do not deviate unless explicitly told.
 
 ## API Patterns
 - Never use `assert` for runtime validation in production code (`python -O` strips asserts and missing-API-key errors lose all context). Use `require_stt_client()` / `require_llm_client()` from `main.py` instead of touching the module-level `stt_client` / `llm_client` singletons directly; they raise `RuntimeError` with user-facing messages shared with `validate_api_keys()`.
+- All transcription work (chunk → STT → join → optional LLM) goes through `run_transcription_pipeline()` in `main.py`; never duplicate that sequence. Callbacks (`on_transcript`, `on_feedback`, `on_progress`) carry output; the pipeline itself never prints.
+- `PromptManager` returns data (lists, bools, strings) and never prints; CLI rendering lives in `main.py` helpers (`print_stored_prompts`, `remove_prompt_by_index`).
 - For TUI-triggered transcription work, send progress through the four high-level feedback IDs `compress`, `transcribe`, `post_process`, and `summary`, and use a separate transcript callback to surface raw STT text before post-processing finishes.
 - `process_with_llm(client, messages, llm_model)` accepts pre-built `messages: list[dict]` and does not construct prompts internally. Use `build_post_process_messages`, `build_summary_messages`, or `build_translate_messages` to assemble messages before calling it.
 - The translation sub-template (`{{translate}}` in the post_process user template) is resolved before injection — when no translation is requested, the placeholder is replaced with an empty string, keeping exactly 2 messages to the LLM.

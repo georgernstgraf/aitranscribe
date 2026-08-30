@@ -366,6 +366,67 @@ def test_set_terminal_title_succeeds_when_title_query_fails():
     assert previous is None
     mock_stdout.write.assert_called_once_with("\x1b]2;aitranscribe\x07")
 
+# --- shared transcription pipeline (issue #71) ---
+
+from main import run_transcription_pipeline
+
+def test_run_transcription_pipeline_raw_mode():
+    """Pipeline returns raw text unchanged when LLM is not needed."""
+    with patch("main.require_stt_client", return_value=MagicMock()), \
+         patch("main.chunk_audio", return_value=["c0.mp3", "c1.mp3"]), \
+         patch("main.transcribe_audio", side_effect=["hello ", " world"]):
+        final_text, raw_text = run_transcription_pipeline(
+            "fake.mp3", stt_model="m", llm_model="m", needs_llm=False,
+            target_language=None, do_chunk=True,
+        )
+    assert final_text == "hello   world"  # chunks joined with a single space
+    assert raw_text == final_text
+
+def test_run_transcription_pipeline_llm_post_process():
+    with patch("main.require_stt_client", return_value=MagicMock()), \
+         patch("main.transcribe_audio", return_value="raw"), \
+         patch("main.require_llm_client", return_value=MagicMock()), \
+         patch("main.process_with_llm", return_value="polished") as mock_llm:
+        final_text, raw_text = run_transcription_pipeline(
+            "fake.mp3", stt_model="m", llm_model="m", needs_llm=True,
+            target_language="English", do_chunk=False,
+        )
+    assert final_text == "polished"
+    assert raw_text == "raw"
+    mock_llm.assert_called_once()
+
+def test_run_transcription_pipeline_feedback_and_transcript_callbacks():
+    feedback_events: list[tuple[str, str]] = []
+    transcript_events: list[str] = []
+    with patch("main.require_stt_client", return_value=MagicMock()), \
+         patch("main.transcribe_audio", return_value="text"):
+        run_transcription_pipeline(
+            "fake.mp3", stt_model="m", llm_model="m", needs_llm=False,
+            target_language=None, do_chunk=False,
+            on_feedback=lambda step, state: feedback_events.append((step, state)),
+            on_transcript=transcript_events.append,
+        )
+    assert ("transcribe", "active") in feedback_events
+    assert ("transcribe", "done") in feedback_events
+    assert ("post_process", "done") in feedback_events
+    assert transcript_events == ["text"]
+
+def test_run_transcription_pipeline_cleans_up_chunks():
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        chunk0 = Path(tmp_dir) / "big_chunk0.mp3"
+        chunk0.write_bytes(b"c")
+        original = Path(tmp_dir) / "big.mp3"
+        original.write_bytes(b"x")
+        with patch("main.chunk_audio", return_value=[str(chunk0), str(original)]), \
+             patch("main.require_stt_client", return_value=MagicMock()), \
+             patch("main.transcribe_audio", return_value="t"):
+            run_transcription_pipeline(
+                str(original), stt_model="m", llm_model="m", needs_llm=False,
+                target_language=None, do_chunk=True,
+            )
+        assert not chunk0.exists()
+        assert original.exists()
+
 def test_wrap_text_short():
     """Test that wrap_text doesn't wrap short text."""
     result = wrap_text("Short text", 80)
@@ -437,32 +498,29 @@ def test_promptmanager_query_prompt_deletes_oldest_prompt():
     finally:
         temp_file.unlink()
 
-def test_promptmanager_list_prompts_empty(capsys):
-    """Test PromptManager.list_prompts with empty queue."""
+def test_promptmanager_list_prompts_empty():
+    """Test PromptManager.list_prompts returns an empty list for an empty queue."""
     with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f:
         temp_file = Path(f.name)
-    
+
     try:
         manager = PromptManager(temp_file)
-        manager.list_prompts()
-        captured = capsys.readouterr()
-        assert "No prompts stored yet" in captured.out
+        assert manager.list_prompts() == []
     finally:
         temp_file.unlink()
 
-def test_promptmanager_list_prompts_populated(capsys):
-    """Test PromptManager.list_prompts with populated queue."""
+def test_promptmanager_list_prompts_populated():
+    """Test PromptManager.list_prompts returns the stored prompts as data."""
     with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f:
         temp_file = Path(f.name)
-    
+
     try:
         manager = PromptManager(temp_file)
         manager.add_prompt("Test prompt", "test.mp3")
-        manager.list_prompts()
-        captured = capsys.readouterr()
-        assert "Stored Prompts:" in captured.out
-        assert "Test prompt" in captured.out
-        assert "test.mp3" in captured.out
+        stored = manager.list_prompts()
+        assert len(stored) == 1
+        assert stored[0]["prompt"] == "Test prompt"
+        assert stored[0]["filename"] == "test.mp3"
     finally:
         temp_file.unlink()
 

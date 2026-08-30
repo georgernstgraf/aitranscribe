@@ -674,21 +674,12 @@ class PromptManager:
             cursor = conn.execute("DELETE FROM prompts WHERE id = ?", (prompt_id,))
             return cursor.rowcount > 0
 
-    def list_prompts(self) -> None:
-        """List all stored prompts in queue order."""
-        stored_prompts = self.prompts
-        if not stored_prompts:
-            console.print("No prompts stored yet.")
-            return
-
-        console.print("Stored Prompts:")
-        for i, prompt in enumerate(stored_prompts, 1):
-            console.print(f"\n{i}. {prompt['prompt']}")
-            console.print(f"    File: {prompt['filename']}")
-            console.print(f"    Time: {prompt['timestamp']}")
+    def list_prompts(self) -> list[dict[str, Any]]:
+        """Return all stored prompts in queue order (caller renders)."""
+        return self.prompts
 
     def query_prompt(self) -> str | None:
-        """Get and remove the oldest stored prompt."""
+        """Get and remove the oldest stored prompt. None if the queue is empty."""
         with self._connect() as conn:
             cursor = conn.execute(
                 """
@@ -700,30 +691,53 @@ class PromptManager:
             )
             row = cursor.fetchone()
             if not row:
-                console.print("No prompts in queue.")
                 return None
 
             conn.execute("DELETE FROM prompts WHERE id = ?", (row[0],))
             return row[1]
 
     def remove_prompt(self, index: int) -> bool:
-        """Remove a stored prompt by its 1-based --list index."""
+        """Remove a stored prompt by its 1-based --list index. False on empty queue or bad index."""
         stored_prompts = self.prompts
         if not stored_prompts:
-            console.print("No prompts to remove.")
             return False
 
         if index < 1 or index > len(stored_prompts):
-            console.print(f"Error: Invalid index {index}. Valid range is 1-{len(stored_prompts)}.")
             return False
 
         removed_prompt = stored_prompts[index - 1]
-        removed = self.remove_prompt_by_id(int(removed_prompt["id"]))
-        if removed:
-            console.print(f"Removed prompt {index}: {removed_prompt['prompt'][:50]}...")
-            return True
+        return self.remove_prompt_by_id(int(removed_prompt["id"]))
+
+
+def print_stored_prompts(stored_prompts: list[dict[str, Any]]) -> None:
+    """Render the stored prompt list for the CLI."""
+    if not stored_prompts:
+        console.print("No prompts stored yet.")
+        return
+
+    console.print("Stored Prompts:")
+    for i, prompt in enumerate(stored_prompts, 1):
+        console.print(f"\n{i}. {prompt['prompt']}")
+        console.print(f"    File: {prompt['filename']}")
+        console.print(f"    Time: {prompt['timestamp']}")
+
+
+def remove_prompt_by_index(manager: PromptManager, index: int) -> None:
+    """Remove a prompt by 1-based list index and print the CLI feedback."""
+    stored_prompts = manager.prompts
+    if not stored_prompts:
+        console.print("No prompts to remove.")
+        return
+
+    if index < 1 or index > len(stored_prompts):
+        console.print(f"Error: Invalid index {index}. Valid range is 1-{len(stored_prompts)}.")
+        return
+
+    removed_prompt = stored_prompts[index - 1]
+    if manager.remove_prompt(index):
+        console.print(f"Removed prompt {index}: {removed_prompt['prompt'][:50]}...")
+    else:
         console.print(f"Warning: Could not remove prompt {index}.")
-        return False
 
 
 def generate_prompt_summary(text: str, llm_model: str) -> str | None:
@@ -806,6 +820,66 @@ def init_app() -> None:
     _initialized = True
 
 
+def run_transcription_pipeline(
+    audio_file: str,
+    *,
+    stt_model: str,
+    llm_model: str,
+    needs_llm: bool,
+    target_language: str | None,
+    do_chunk: bool = True,
+    on_transcript: Callable[[str], None] | None = None,
+    on_feedback: Callable[[str, str], None] | None = None,
+    on_progress: Callable[[str], None] | None = None,
+) -> tuple[str, str]:
+    """Shared chunk → STT → optional LLM post-process pipeline.
+
+    Returns (final_text, raw_text). Emits progress via callbacks; never prints.
+    on_feedback receives ("transcribe"|"post_process", "active"|"done") pairs (TUI).
+    on_progress receives human-readable stage descriptions (legacy CLI).
+    """
+    def feedback(step_id: str, status: str) -> None:
+        if on_feedback:
+            on_feedback(step_id, status)
+
+    def progress(message: str) -> None:
+        if on_progress:
+            on_progress(message)
+
+    feedback("transcribe", "active")
+    if do_chunk:
+        chunks = chunk_audio(audio_file)
+    else:
+        chunks = [audio_file]
+
+    transcripts: list[str] = []
+    for i, chunk_path in enumerate(chunks):
+        if len(chunks) > 1:
+            progress(f"Transcribing chunk {i + 1}/{len(chunks)}...")
+        else:
+            progress("Transcribing audio...")
+        transcripts.append(transcribe_audio(require_stt_client(), chunk_path, stt_model))
+        if chunk_path != audio_file and os.path.exists(chunk_path):
+            os.remove(chunk_path)
+
+    raw_text = " ".join(text for text in transcripts if text).strip()
+    if on_transcript:
+        on_transcript(raw_text)
+    feedback("transcribe", "done")
+
+    final_text = raw_text
+    if needs_llm:
+        feedback("post_process", "active")
+        progress("Processing with LLM...")
+        messages = build_post_process_messages(raw_text, target_language)
+        final_text = process_with_llm(require_llm_client(), messages, llm_model)
+        feedback("post_process", "done")
+    else:
+        feedback("post_process", "done")
+
+    return final_text, raw_text
+
+
 def process_recorded_audio_for_tui(
     audio_np: np.ndarray,
     settings: dict[str, Any],
@@ -837,20 +911,16 @@ def process_recorded_audio_for_tui(
         if os.path.exists(raw_wav_file):
             os.remove(raw_wav_file)
 
-        update_feedback("transcribe", "active")
-        transcript = transcribe_audio(require_stt_client(), final_mp3_file, str(settings.get("stt_model", GROQ_STT_MODEL)))
-        if transcript_callback:
-            transcript_callback(transcript)
-        update_feedback("transcribe", "done")
-
-        final_text = transcript
-        if needs_llm:
-            update_feedback("post_process", "active")
-            messages = build_post_process_messages(transcript, target_language)
-            final_text = process_with_llm(require_llm_client(), messages, str(settings.get("llm_model", LLM_MODEL)))
-            update_feedback("post_process", "done")
-        else:
-            update_feedback("post_process", "done")
+        final_text, transcript = run_transcription_pipeline(
+            final_mp3_file,
+            stt_model=str(settings.get("stt_model", GROQ_STT_MODEL)),
+            llm_model=str(settings.get("llm_model", LLM_MODEL)),
+            needs_llm=needs_llm,
+            target_language=target_language,
+            do_chunk=False,
+            on_transcript=transcript_callback,
+            on_feedback=update_feedback,
+        )
 
         append_mode = bool(settings.get("append_mode", False))
         if append_mode:
@@ -909,26 +979,17 @@ def process_file_for_tui(
 
     try:
         update_feedback("compress", "done")
-        update_feedback("transcribe", "active")
-        chunks = chunk_audio(file_for_processing)
-        transcripts = []
-        for chunk_path in chunks:
-            transcripts.append(transcribe_audio(require_stt_client(), chunk_path, str(settings.get("stt_model", GROQ_STT_MODEL))))
-            if chunk_path != file_for_processing:
-                os.remove(chunk_path)
-        raw_text = " ".join(text for text in transcripts if text).strip()
-        if transcript_callback:
-            transcript_callback(raw_text)
-        update_feedback("transcribe", "done")
 
-        final_text = raw_text
-        if needs_llm:
-            update_feedback("post_process", "active")
-            messages = build_post_process_messages(raw_text, target_language)
-            final_text = process_with_llm(require_llm_client(), messages, str(settings.get("llm_model", LLM_MODEL)))
-            update_feedback("post_process", "done")
-        else:
-            update_feedback("post_process", "done")
+        final_text, raw_text = run_transcription_pipeline(
+            file_for_processing,
+            stt_model=str(settings.get("stt_model", GROQ_STT_MODEL)),
+            llm_model=str(settings.get("llm_model", LLM_MODEL)),
+            needs_llm=needs_llm,
+            target_language=target_language,
+            do_chunk=True,
+            on_transcript=transcript_callback,
+            on_feedback=update_feedback,
+        )
 
         append_mode = bool(settings.get("append_mode", False))
         if append_mode:
@@ -1099,17 +1160,19 @@ def main(
     # Handle prompt management commands
     try:
         if list_prompts:
-            prompt_manager.list_prompts()
+            print_stored_prompts(prompt_manager.list_prompts())
             raise typer.Exit(code=0)
 
         if remove_prompt is not None:
-            prompt_manager.remove_prompt(remove_prompt)
+            remove_prompt_by_index(prompt_manager, remove_prompt)
             raise typer.Exit(code=0)
 
         if query_prompt:
             retrieved_prompt = prompt_manager.query_prompt()
             if retrieved_prompt:
                 console.print(wrap_text(retrieved_prompt))
+            else:
+                console.print("No prompts in queue.")
             raise typer.Exit(code=0)
     except sqlite3.Error as e:
         console.print(f"Error: Prompt database operation failed: {e}")
@@ -1159,52 +1222,34 @@ def transcribe_file(file_path: str, stt_model: str, llm_model: str, post_process
         console.print(f"Warning: Could not copy file to temp directory: {e}")
 
     try:
+        if needs_llm:
+            console.print(f"\nPost-Processing: {'Translate to English + Cleanup' if english else 'Cleanup'}")
+
         with Progress(
             TextColumn("{task.description}"),
             transient=True,
             console=console
         ) as progress:
-            # 1. Chunking
             progress.add_task(description="Checking file size and chunking...", total=None)
-            chunks = chunk_audio(file_path)
-
-            # 2. Transcribing
-            full_transcript = []
-            for i, chunk_path in enumerate(chunks):
-                progress.update(progress.task_ids[0], description=f"Transcribing chunk {i+1}/{len(chunks)}...")
-                transcript = transcribe_audio(require_stt_client(), chunk_path, stt_model)
-                full_transcript.append(transcript)
-
-                # Cleanup chunks if they were created
-                if chunk_path != file_path:
-                    os.remove(chunk_path)
-
-            final_text = " ".join(t for t in full_transcript if t).strip()
+            final_text, _ = run_transcription_pipeline(
+                file_path,
+                stt_model=stt_model,
+                llm_model=llm_model,
+                needs_llm=needs_llm,
+                target_language=target_language,
+                do_chunk=True,
+                on_progress=lambda message: progress.update(progress.task_ids[0], description=message),
+            )
 
         console.print("\nTranscription Complete:")
         console.print(wrap_text(final_text))
 
-        # 3. Post-Processing
         if needs_llm:
-            console.print(f"\nPost-Processing: {'Translate to English + Cleanup' if english else 'Cleanup'}")
-
-            with Progress(
-                TextColumn("{task.description}"),
-                transient=True,
-                console=console
-            ) as progress:
-                progress.add_task(description="Processing with LLM...", total=None)
-                messages = build_post_process_messages(final_text, target_language)
-                llm_result = process_with_llm(require_llm_client(), messages, llm_model)
-
             console.print("\nLLM Result:")
-            console.print(wrap_text(llm_result))
+            console.print(wrap_text(final_text))
 
-            # Store LLM result in prompt queue
-            prompt_manager.add_prompt(llm_result, file_path)
-        else:
-            # Store raw transcription in prompt queue
-            prompt_manager.add_prompt(final_text, file_path)
+        # Store post-processed or raw transcription in prompt queue
+        prompt_manager.add_prompt(final_text, file_path)
 
     except Exception as e:
         console.print(f"An error occurred: {str(e)}")
@@ -1212,34 +1257,8 @@ def transcribe_file(file_path: str, stt_model: str, llm_model: str, post_process
             console.print_exception()
         raise typer.Exit(code=1)
 
-def record_from_microphone(stt_model: str, llm_model: str, post_process: bool, verbose: bool, english: bool):
-    """Record audio from microphone in toggle mode and transcribe it using Groq."""
-    if verbose:
-        state["verbose"] = True
-
-    target_language = "English" if english else None
-    needs_llm = english or post_process
-
-    validate_api_keys("post_process" if needs_llm else None)
-
-    samplerate = 44100
-    channels = 1
-    audio_data = []
-
-    console.print("Toggle Recording")
-    console.print(f"STT Provider: Groq")
-    console.print(f"STT Model: {stt_model}")
-    if needs_llm:
-        console.print(f"LLM Provider: {LLM_PROVIDER}")
-        console.print(f"LLM Model: {llm_model}")
-
-    console.print("Press SPACE to start recording. Press SPACE again to stop. Press ESC to cancel.")
-
-    recording_state = {
-        "is_recording": False,
-        "stop_event": False,
-        "cancelled": False
-    }
+def _start_keyboard_listener(recording_state: dict[str, bool], verbose: bool) -> keyboard.Listener | None:
+    """Start a pynput listener implementing SPACE toggle / ESC cancel. None on failure."""
 
     def on_press(key: keyboard.Key | keyboard.KeyCode | None) -> Any:
         if key == keyboard.Key.space:
@@ -1256,48 +1275,92 @@ def record_from_microphone(stt_model: str, llm_model: str, post_process: bool, v
     def on_release(key: keyboard.Key | keyboard.KeyCode | None) -> Any:
         return None
 
-    listener = None
     try:
         listener = keyboard.Listener(on_press=on_press, on_release=on_release, suppress=True)
         listener.start()
+        return listener
     except Exception as e:
         if verbose:
             console.print(f"Warning: Could not start pynput listener: {e}")
         console.print("Falling back to terminal toggle-mode recording.")
-        listener = None
+        return None
 
-    fd = None
-    old_settings = None
 
-    if os.name != 'nt':
+def _enter_raw_terminal_mode() -> tuple[int | None, Any | None]:
+    """Disable echo/canonical mode for non-blocking key reads. Returns (fd, old_settings)."""
+    if os.name == 'nt':
+        return None, None
+    try:
+        import termios
+        fd = sys.stdin.fileno()
+        old_settings = termios.tcgetattr(fd)
+        new_settings = termios.tcgetattr(fd)
+        new_settings[3] = new_settings[3] & ~termios.ECHO
+        new_settings[3] = new_settings[3] & ~termios.ICANON
+        new_settings[6][termios.VMIN] = 0
+        new_settings[6][termios.VTIME] = 0
+        termios.tcsetattr(fd, termios.TCSADRAIN, new_settings)
+        return fd, old_settings
+    except (ImportError, Exception):
+        console.print("Warning: Could not set up raw keyboard mode. Fallback may behave differently.")
+        return None, None
+
+
+def _restore_terminal_mode(fd: int | None, old_settings: Any) -> None:
+    """Restore terminal settings saved by _enter_raw_terminal_mode."""
+    if os.name == 'nt':
         try:
-            import termios
-            fd = sys.stdin.fileno()
-            old_settings = termios.tcgetattr(fd)
-            new_settings = termios.tcgetattr(fd)
-            new_settings[3] = new_settings[3] & ~termios.ECHO
-            new_settings[3] = new_settings[3] & ~termios.ICANON
-            new_settings[6][termios.VMIN] = 0
-            new_settings[6][termios.VTIME] = 0
-            termios.tcsetattr(fd, termios.TCSADRAIN, new_settings)
-        except (ImportError, Exception):
-            console.print("Warning: Could not set up raw keyboard mode. Fallback may behave differently.")
+            import msvcrt
+            while msvcrt.kbhit():
+                msvcrt.getch()
+        except Exception:
+            console.print("Warning: Could not flush input buffer.")
+        return
+    if fd is None or old_settings is None:
+        return
+    try:
+        import termios
+        termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
+        termios.tcflush(fd, termios.TCIFLUSH)
+    except Exception:
+        console.print("Error: Could not restore terminal settings. Your terminal may behave unexpectedly.")
 
-    if listener is None:
-        if os.name == 'nt' or fd is not None:
-            console.print("Press SPACE to start, SPACE again to stop. Press ESC to cancel.")
-        else:
-            console.print(f"Error: Could not set up keyboard input.")
-            raise typer.Exit(code=1)
+
+def _read_fallback_key(fd: int | None) -> str | None:
+    """Read one key without pynput: msvcrt on Windows, non-blocking stdin elsewhere."""
+    if os.name == 'nt':
+        import msvcrt
+        if msvcrt.kbhit():
+            char = msvcrt.getch()
+            if char == b' ':
+                return ' '
+            if char == b'\x1b':
+                return '\x1b'
+        return None
+    import select
+    if fd is not None and select.select([fd], [], [], 0.01)[0]:
+        return sys.stdin.read(1)
+    return None
+
+
+def _record_until_toggle(
+    recording_state: dict[str, bool],
+    listener: keyboard.Listener | None,
+    fd: int | None,
+    old_settings: Any,
+    audio_data: list[Any],
+    samplerate: int,
+    channels: int,
+) -> None:
+    """Record into audio_data until SPACE toggles stop or ESC cancels. Returns on cancel."""
+    def callback(indata, frames, cb_time, status):
+        if recording_state["is_recording"]:
+            audio_data.append(indata.copy())
 
     try:
         # Hide cursor during recording
         sys.stdout.write("\033[?25l")
         sys.stdout.flush()
-
-        def callback(indata, frames, cb_time, status):
-            if recording_state["is_recording"]:
-                audio_data.append(indata.copy())
 
         with _get_sd().InputStream(samplerate=samplerate, channels=channels, callback=callback):
             start_time = None
@@ -1313,28 +1376,14 @@ def record_from_microphone(stt_model: str, llm_model: str, post_process: bool, v
 
                 # Check for fallback keyboard input
                 if listener is None:
-                    key = None
-                    if os.name == 'nt':
-                        import msvcrt
-                        if msvcrt.kbhit():
-                            char = msvcrt.getch()
-                            # Handle ESC (27) or Space (32)
-                            if char == b' ':
-                                key = ' '
-                            elif char == b'\x1b':
-                                key = '\x1b'
-                    else:
-                        import select
-                        if fd is not None and select.select([fd], [], [], 0.01)[0]:
-                            key = sys.stdin.read(1)
-
+                    key = _read_fallback_key(fd)
                     if key == ' ':
                         if not recording_state["is_recording"]:
                             recording_state["is_recording"] = True
                         else:
                             recording_state["is_recording"] = False
                             recording_state["stop_event"] = True
-                    elif key == '\x1b' or key == '\x03':
+                    elif key in ('\x1b', '\x03'):
                         recording_state["stop_event"] = True
                         recording_state["cancelled"] = True
                         break
@@ -1365,30 +1414,58 @@ def record_from_microphone(stt_model: str, llm_model: str, post_process: bool, v
                 if recording_state["is_recording"]:
                     console.print("\nRecording cancelled.")
                 return
-
     finally:
         # Show cursor again
         sys.stdout.write("\033[?25h")
         sys.stdout.flush()
         if listener is not None and listener.is_alive():
             listener.stop()
-        # Restore terminal settings
-        if os.name != 'nt':
-            if fd is not None and old_settings is not None:
-                try:
-                    import termios
-                    termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
-                    termios.tcflush(fd, termios.TCIFLUSH)
-                except Exception:
-                    console.print("Error: Could not restore terminal settings. Your terminal may behave unexpectedly.")
+        _restore_terminal_mode(fd, old_settings)
+
+
+def record_from_microphone(stt_model: str, llm_model: str, post_process: bool, verbose: bool, english: bool):
+    """Record audio from microphone in toggle mode and transcribe it using Groq."""
+    if verbose:
+        state["verbose"] = True
+
+    target_language = "English" if english else None
+    needs_llm = english or post_process
+
+    validate_api_keys("post_process" if needs_llm else None)
+
+    samplerate = 44100
+    channels = 1
+    audio_data = []
+
+    console.print("Toggle Recording")
+    console.print(f"STT Provider: Groq")
+    console.print(f"STT Model: {stt_model}")
+    if needs_llm:
+        console.print(f"LLM Provider: {LLM_PROVIDER}")
+        console.print(f"LLM Model: {llm_model}")
+
+    console.print("Press SPACE to start recording. Press SPACE again to stop. Press ESC to cancel.")
+
+    recording_state = {
+        "is_recording": False,
+        "stop_event": False,
+        "cancelled": False
+    }
+
+    listener = _start_keyboard_listener(recording_state, verbose)
+    fd, old_settings = _enter_raw_terminal_mode()
+
+    if listener is None:
+        if os.name == 'nt' or fd is not None:
+            console.print("Press SPACE to start, SPACE again to stop. Press ESC to cancel.")
         else:
-            # Windows: Flush input buffer
-            try:
-                import msvcrt
-                while msvcrt.kbhit():
-                    msvcrt.getch()
-            except Exception:
-                console.print("Warning: Could not flush input buffer.")
+            console.print(f"Error: Could not set up keyboard input.")
+            raise typer.Exit(code=1)
+
+    _record_until_toggle(recording_state, listener, fd, old_settings, audio_data, samplerate, channels)
+
+    if recording_state["cancelled"]:
+        return
 
     if not audio_data:
         console.print("No audio recorded. Exiting.")
@@ -1417,33 +1494,25 @@ def record_from_microphone(stt_model: str, llm_model: str, post_process: bool, v
 
             console.print(f"Audio saved to {final_mp3_file}")
 
-            progress.add_task(description="Transcribing audio...", total=None)
-            transcript = transcribe_audio(require_stt_client(), final_mp3_file, stt_model)
+            final_text, transcript = run_transcription_pipeline(
+                final_mp3_file,
+                stt_model=stt_model,
+                llm_model=llm_model,
+                needs_llm=needs_llm,
+                target_language=target_language,
+                do_chunk=False,
+                on_progress=lambda message: progress.update(progress.task_ids[0], description=message),
+            )
 
         console.print("\nTranscription Complete:")
         console.print(wrap_text(transcript))
 
-        # Post-Processing
         if needs_llm:
-            console.print(f"\nPost-Processing: {'Translate to English + Cleanup' if english else 'Cleanup'}")
-
-            with Progress(
-                TextColumn("{task.description}"),
-                transient=True,
-                console=console
-            ) as progress:
-                progress.add_task(description="Processing with LLM...", total=None)
-                messages = build_post_process_messages(transcript, target_language)
-                llm_result = process_with_llm(require_llm_client(), messages, llm_model)
-
             console.print("\nLLM Result:")
-            console.print(wrap_text(llm_result))
+            console.print(wrap_text(final_text))
 
-            # Store LLM result in prompt queue
-            prompt_manager.add_prompt(llm_result, final_mp3_file)
-        else:
-            # Store raw transcription in prompt queue
-            prompt_manager.add_prompt(transcript, final_mp3_file)
+        # Store post-processed or raw transcription in prompt queue
+        prompt_manager.add_prompt(final_text, final_mp3_file)
 
     except Exception as e:
         console.print(f"An error occurred: {str(e)}")

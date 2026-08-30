@@ -6,6 +6,7 @@ import shutil
 import subprocess
 import sys
 import textwrap
+from dataclasses import dataclass
 from typing import Any, Callable, Mapping
 
 import numpy as np
@@ -139,10 +140,12 @@ def _get_sd():
     return _sd
 
 
+@dataclass
 class RecordingController:
-    def __init__(self, samplerate: int = 44100, channels: int = 1) -> None:
-        self.samplerate = samplerate
-        self.channels = channels
+    samplerate: int = 44100
+    channels: int = 1
+
+    def __post_init__(self) -> None:
         self._chunks: list[np.ndarray] = []
         self._stream: sd.InputStream | None = None
         self.is_recording = False
@@ -932,35 +935,34 @@ class AitranscribeTUI(App[None]):
             self.latest_transcript = text or "No transcript returned."
         self.refresh_transcript()
 
-    def process_audio_worker(self, audio: np.ndarray, settings: dict[str, Any]) -> None:
+    def _make_worker_callbacks(self) -> tuple[Callable[[str, str], None], Callable[[str], None]]:
+        """Shared feedback/transcript closures routing worker events to the UI thread."""
         def feedback(step_id: str, state: str) -> None:
             self.call_from_thread(self.update_feedback_state, step_id, state)
 
         def transcript_callback(text: str) -> None:
             self.call_from_thread(self.update_transcript_from_worker, text)
 
+        return feedback, transcript_callback
+
+    def _run_pipeline_worker(self, run: Callable[[Callable[[str, str], None], Callable[[str], None]], dict[str, Any]]) -> None:
+        feedback, transcript_callback = self._make_worker_callbacks()
         try:
-            result = self.process_audio(audio, settings, feedback, transcript_callback)
+            result = run(feedback, transcript_callback)
         except Exception as exc:
             self.call_from_thread(self.processing_failed, str(exc))
             return
-
         self.call_from_thread(self.processing_finished, result)
+
+    def process_audio_worker(self, audio: np.ndarray, settings: dict[str, Any]) -> None:
+        self._run_pipeline_worker(
+            lambda feedback, transcript_callback: self.process_audio(audio, settings, feedback, transcript_callback)
+        )
 
     def process_file_worker(self, file_path: str, settings: dict[str, Any]) -> None:
-        def feedback(step_id: str, state: str) -> None:
-            self.call_from_thread(self.update_feedback_state, step_id, state)
-
-        def transcript_callback(text: str) -> None:
-            self.call_from_thread(self.update_transcript_from_worker, text)
-
-        try:
-            result = self.process_file(file_path, settings, feedback, transcript_callback)
-        except Exception as exc:
-            self.call_from_thread(self.processing_failed, str(exc))
-            return
-
-        self.call_from_thread(self.processing_finished, result)
+        self._run_pipeline_worker(
+            lambda feedback, transcript_callback: self.process_file(file_path, settings, feedback, transcript_callback)
+        )
 
     def processing_failed(self, error_message: str) -> None:
         self.is_processing = False
