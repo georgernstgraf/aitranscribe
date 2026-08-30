@@ -296,6 +296,10 @@ class PersistInput(Input):
 
 
 class AitranscribeTUI(App[None]):
+    # No automatic focus on mount: the app starts in Command Mode with no
+    # focused widget, and users enter Pane Focus Mode explicitly (Tab/click).
+    AUTO_FOCUS = None
+
     CSS = """
     Screen {
         layout: vertical;
@@ -614,23 +618,11 @@ class AitranscribeTUI(App[None]):
         self.refresh_feedback()
         self.refresh_history()
         self.call_after_refresh(self.refresh_history)
-        self._focus_initial_widget()
         if self.backfill_summaries is not None:
             self.run_worker(self.backfill_summaries_worker, thread=True, exclusive=False)
 
     def refresh_status(self) -> None:
         self.refresh_status_panel()
-
-    def _focus_initial_widget(self) -> None:
-        if self.input_source == "file":
-            self.set_focus(self.query_one("#file_path", Input))
-            return
-
-        history_list = self.query_one("#history_list", OptionList)
-        self.set_focus(history_list)
-        if self.history_prompts:
-            history_list.highlighted = 0
-            self.select_history_prompt(0)
 
     def get_displayed_transcript(self) -> str:
         if self.selected_history_text and not self.is_recording and not self.is_processing:
@@ -1023,7 +1015,8 @@ class AitranscribeTUI(App[None]):
         except Exception:
             self.call_from_thread(self.update_feedback_state, "summary", "error")
             return
-        self.call_from_thread(self.update_feedback_state, "summary", "done")
+        # Backfill is maintenance, not a transcription phase: leave no [x] tick.
+        self.call_from_thread(self.update_feedback_state, "summary", "pending")
         if updated:
             self.call_from_thread(self.refresh_history)
 
@@ -1215,7 +1208,6 @@ class AitranscribeTUI(App[None]):
     def on_radio_set_changed(self, event: RadioSet.Changed) -> None:
         if event.radio_set.id == "source_modes" and event.pressed.id:
             self.input_source = event.pressed.id.removeprefix("source-")
-            self.persist_setting_value("input_source", self.input_source)
             self.set_idle_status()
             if self.input_source == "file":
                 self.set_focus(self.query_one("#file_path", Input))

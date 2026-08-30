@@ -59,7 +59,6 @@ OPENROUTER_LLM_MODEL="anthropic/claude-3-haiku"
 # =============================================================================
 
 PRE_PROCESS_MODE="english"
-TRANSCRIBE_SOURCE="microphone"
 LAST_FILE_PATH=""
 VERBOSE_ERRORS="false"
 

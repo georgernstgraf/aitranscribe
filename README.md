@@ -134,10 +134,11 @@ The configuration file also remembers TUI state:
 
 ```ini
 PRE_PROCESS_MODE="english"       # raw, cleanup, or english
-TRANSCRIBE_SOURCE="microphone"   # microphone or file
 LAST_FILE_PATH=""                # last used file path
 VERBOSE_ERRORS="false"           # show detailed errors
 ```
+
+The recording mode (microphone vs filesystem file) is chosen per session in the TUI and always starts as microphone on launch.
 
 ## Project structure
 

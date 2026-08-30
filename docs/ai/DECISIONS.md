@@ -153,6 +153,12 @@ Each entry documents WHAT was decided and WHY.
 - **Considered**: Auto-rename on startup when the new file is missing but the old one exists.
 - **Tradeoff**: Upgraders lose their config silently (fresh default template created with placeholder keys) unless they rename manually — this is a known, accepted cost of skipping auto-migration.
 
+## 2026-08-30: Launch TUI In Command Mode With Microphone And Silent Summary Backfill
+- **Choice**: The TUI always starts in Command Mode with no focused widget (`AUTO_FOCUS = None`, `_focus_initial_widget` removed), the recording mode always starts as microphone on launch (input source is session-only, `TRANSCRIBE_SOURCE` removed from config entirely), and the startup summary backfill resets the summary feedback to pending instead of leaving a `[x]` tick.
+- **Reason**: Users launch the app to dictate, so command hotkeys (Space/A/W/Q) must work immediately without pressing Escape first; a stale persisted file-mode or a ticked summary row implied wrong state on startup.
+- **Considered**: Keeping file-path autofocus in file mode, auto-renaming the old config key, leaving the tick visible.
+- **Tradeoff**: Users must Tab or click into a pane to type in it; recording mode is no longer remembered across sessions; backfill success is invisible in the feedback log (errors still show).
+
 ## 2026-08-30: Replace Production Asserts With Typed RuntimeError Helpers
 - **Choice**: All `assert stt_client/llm_client is not None` sites in `main.py` replaced by `require_stt_client()` / `require_llm_client()` helpers that raise `RuntimeError` with user-facing messages; message text lives in `stt_missing_message()` / `llm_missing_message()` and is shared with `validate_api_keys()`.
 - **Reason**: Missing API keys previously raised a raw `AssertionError` with no context. RuntimeErrors surface through the existing `except Exception` handlers in both TUI workers and legacy CLI paths.

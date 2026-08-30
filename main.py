@@ -89,7 +89,6 @@ def _create_default_config() -> None:
         f.write('# GOOGLE_LLM_MODEL="gemini-2.0-flash"\n')
         f.write('\n# TUI Defaults\n')
         f.write('PRE_PROCESS_MODE="english"\n')
-        f.write('TRANSCRIBE_SOURCE="microphone"\n')
         f.write('LAST_FILE_PATH=""\n')
         f.write('VERBOSE_ERRORS="false"\n')
         # Single quotes to avoid dotenv escape handling of \a, \b, \f, \n, etc.
@@ -104,7 +103,6 @@ _MIGRATION_BLOCKS: list[tuple[str, str]] = [
     ("ZAI_API_KEY", '\n# z.ai (alternative provider)\n# ZAI_API_KEY="your_zai_api_key_here"\n# ZAI_LLM_MODEL="glm-5"\n'),
     ("GOOGLE_API_KEY", '\n# Google (alternative provider)\n# GOOGLE_API_KEY="your_google_api_key_here"\n# GOOGLE_LLM_MODEL="gemini-2.0-flash"\n'),
     ("PRE_PROCESS_MODE", '\n# TUI Defaults\nPRE_PROCESS_MODE="english"\n'),
-    ("TRANSCRIBE_SOURCE", 'TRANSCRIBE_SOURCE="microphone"\n'),
     ("LAST_FILE_PATH", 'LAST_FILE_PATH=""\n'),
     ("VERBOSE_ERRORS", 'VERBOSE_ERRORS="false"\n'),
 ]
@@ -295,11 +293,6 @@ def _normalize_pre_process_mode(value: str | None) -> str:
 DEFAULT_PRE_PROCESS_MODE: str = "english"
 DEFAULT_VERBOSE_ERRORS: bool = False
 
-
-def _normalize_transcribe_source(value: str | None) -> str:
-    normalized = (value or "microphone").strip().lower()
-    return normalized if normalized in {"microphone", "file"} else "microphone"
-
 def _get_llm_client() -> OpenAI | None:
     if LLM_PROVIDER not in LLM_PROVIDERS:
         console.print(f"Warning: Unknown LLM_PROVIDER '{LLM_PROVIDER}', falling back to 'openrouter'")
@@ -393,9 +386,6 @@ def persist_tui_setting(setting_name: str, value: Any) -> None:
     if setting_name == "pre_process_mode":
         persist_config_value("PRE_PROCESS_MODE", _normalize_pre_process_mode(str(value)))
         return
-    if setting_name == "input_source":
-        persist_config_value("TRANSCRIBE_SOURCE", _normalize_transcribe_source(str(value)))
-        return
     if setting_name == "file_path":
         persist_config_value("LAST_FILE_PATH", str(value).strip())
         return
@@ -415,7 +405,8 @@ def get_tui_settings() -> dict[str, Any]:
     provider = LLM_PROVIDERS.get(LLM_PROVIDER, LLM_PROVIDERS["openrouter"])
     return {
         "pre_process_mode": _normalize_pre_process_mode(config.get("PRE_PROCESS_MODE") or DEFAULT_PRE_PROCESS_MODE),
-        "input_source": _normalize_transcribe_source(config.get("TRANSCRIBE_SOURCE")),
+        # Recording mode always starts as microphone; the TUI source selection is session-only.
+        "input_source": "microphone",
         "file_path": str(config.get("LAST_FILE_PATH") or "").strip(),
         "stt_model": (config.get("GROQ_STT_MODEL") or GROQ_STT_MODEL or "whisper-large-v3-turbo").strip(),
         "llm_model": (config.get(provider["env_model"]) or LLM_MODEL or provider["default_model"]).strip(),

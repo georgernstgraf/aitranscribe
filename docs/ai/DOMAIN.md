@@ -22,6 +22,7 @@ Business rules and domain relationships not obvious from code.
 - The transcript panel doubles as a full-message preview for stored history: when the user highlights an entry with the arrow keys, that entry's complete text should replace the current idle transcript view.
 - The TUI must provide an explicit transcript-copy action because visual mouse selection in the fullscreen interface is not sufficient for cross-application paste.
 - The TUI `Recording Mode` panel must support both live microphone capture and filesystem audio-file transcription, with `english` as the default preprocessing mode.
+- The TUI always launches in Command Mode (no focused widget) with the recording mode set to microphone; the source selection is session-only and not persisted.
 - Missing summaries should be backfilled only during TUI/default startup, and newly saved TUI transcriptions should get summaries asynchronously after the full transcript is already shown.
 - During live processing, the transcript pane should show raw transcription as soon as STT completes, then replace it with post-processed text once that stage finishes if post-processing is enabled.
 - Startup history previews should use the same truncation result as post-transcription refreshes; the app now achieves that by rebuilding the history list once more after the first layout pass.

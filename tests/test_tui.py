@@ -247,6 +247,34 @@ async def test_refresh_status_shows_command_mode_hint():
 
 
 @pytest.mark.anyio
+async def test_tui_starts_in_command_mode_on_mount():
+    prompt_manager = Mock()
+    prompt_manager.count_prompts.return_value = 1
+    prompt_manager.recent_prompts.return_value = [
+        {"id": 7, "prompt": "Stored transcript", "filename": "a.mp3", "timestamp": "2026-03-09T11:00:00", "summary": None},
+    ]
+
+    app = AitranscribeTUI(
+        prompt_manager=prompt_manager,
+        process_audio=Mock(),
+        process_file=Mock(),
+        stt_provider_name="Groq",
+        llm_provider_name="openrouter",
+        default_stt_model="whisper",
+        default_llm_model="gpt",
+        initial_settings={"pre_process_mode": "english", "input_source": "microphone"},
+    )
+
+    async with app.run_test():
+        assert app.is_command_mode() is True
+        assert app.is_pane_focus_mode() is False
+        assert app.focused is None
+        state_text = str(app.query_one("#state_status", Static).render())
+
+    assert state_text == "Command Mode | Ready"
+
+
+@pytest.mark.anyio
 async def test_refresh_status_shows_pane_focus_mode_hint():
     prompt_manager = Mock()
     prompt_manager.count_prompts.return_value = 1
@@ -325,6 +353,7 @@ async def test_recording_status_overrides_command_mode_idle_message():
     app.status_text = "Press Space to Start Recording"
 
     async with app.run_test():
+        app.set_focus(app.query_one("#transcript_editor", TextArea))
         app.refresh_status()
         state_text = str(app.query_one("#state_status", Static).render())
 

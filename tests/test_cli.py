@@ -289,9 +289,9 @@ def test_get_recording_file_paths_uses_three_digits():
 
 
 def test_get_tui_settings_defaults_to_english_and_microphone(tmp_path):
-    """Test TUI settings load new defaults from config."""
+    """TUI settings load from config; input_source is always microphone."""
     config_file = tmp_path / "aitranscribe.conf"
-    config_file.write_text('PRE_PROCESS_MODE="english"\nTRANSCRIBE_SOURCE="microphone"\nVERBOSE_ERRORS="false"\n')
+    config_file.write_text('PRE_PROCESS_MODE="english"\nVERBOSE_ERRORS="false"\n')
 
     with patch("main.CONFIG_FILE", config_file), patch("main.GROQ_STT_MODEL", "whisper"), patch("main.LLM_MODEL", "gpt"):
         settings = get_tui_settings()
@@ -299,6 +299,17 @@ def test_get_tui_settings_defaults_to_english_and_microphone(tmp_path):
     assert settings["pre_process_mode"] == "english"
     assert settings["input_source"] == "microphone"
     assert settings["file_path"] == ""
+
+
+def test_get_tui_settings_always_starts_microphone(tmp_path):
+    """Recording mode is session-only: even a stale persisted source is ignored."""
+    config_file = tmp_path / "aitranscribe.conf"
+    config_file.write_text('TRANSCRIBE_SOURCE="file"\n')
+
+    with patch("main.CONFIG_FILE", config_file), patch("main.GROQ_STT_MODEL", "whisper"), patch("main.LLM_MODEL", "gpt"):
+        settings = get_tui_settings()
+
+    assert settings["input_source"] == "microphone"
 
 def test_validate_api_keys_with_stt_client_none():
     """Test that validate_api_keys fails when stt_client is None."""
