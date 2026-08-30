@@ -1,11 +1,5 @@
 # Handoff
 
-No pending code tasks. Code audit remediation (#63) complete — all sub-issues #67–#72 closed.
+No pending tasks. Code audit remediation (#63) complete; user manually verified the restructured mic/TUI recording paths (#71) and terminal title behavior (#67) — all working.
 
-Awaiting user manual verification (cannot be automated):
-- Legacy microphone recording + live TUI recording (keyboard/raw-mode restructured in #71)
-- Terminal title set/restore behavior in a real terminal (#67)
-
-Rules: never close #63 while sub-issues are open. All sub-issues are closed; #63 can be closed.
-
-Last updated: 2026-08-30.
+Last cleared: 2026-08-30.

@@ -16,11 +16,11 @@ Code audit remediation (#63) complete: #62/#67–#72 all done and closed; #63 re
 - [x] #63 split into sub-issues #68–#72, all linked via Sub-Issues API; pydub → ffmpeg refactor (aa50dd9, issue #66)
 
 ## Pending
-- [ ] Close #63 (all sub-issues closed)
-- [ ] User manual check: legacy mic recording + live TUI recording (keyboard/raw-mode restructured in #71); terminal title behavior (#67)
+- [x] User verified: legacy mic recording, live TUI recording (#71 restructure), and terminal title (#67) all work
+- None open
 
 ## Blockers
 - None
 
 ## Next Session Suggestion
-Close #63 with summary comment. Await user verification of manual TUI/mic paths.
+Clean slate. Remaining audit items (#8 chunk docstring mismatch, #9 compress/transcribe error handling) were deemed optional; open fresh issues if wanted.
