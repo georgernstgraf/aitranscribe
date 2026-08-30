@@ -141,6 +141,12 @@ Each entry documents WHAT was decided and WHY.
 - **Considered**: Appending the user's request to the system prompt (old pattern), or sending 3 messages (system, task, data).
 - **Tradeoff**: Three different message builders are needed (post_process, summary, translate), but each is simple and the assembly logic is clear.
 
+## 2026-08-30: Replace pydub With Direct ffmpeg/ffprobe Subprocess Calls
+- **Choice**: Drop the `pydub` dependency entirely; `core.py` calls `ffmpeg`/`ffprobe` via `subprocess` through new `_ffmpeg()` and `_ffprobe()` helpers.
+- **Reason**: pydub is a thin wrapper that shells out to ffmpeg anyway; direct calls remove a dependency and enable stream-copy chunking (`-f segment -c copy`) instead of re-encoding every chunk in Python.
+- **Considered**: Keeping pydub for a friendlier API, or moving to a maintained fork.
+- **Tradeoff**: Chunk boundaries fall on keyframes rather than exact 10-minute marks (harmless for transcription), and ffmpeg/ffprobe binaries are now hard requirements at runtime.
+
 ## 2026-03-11: Make Sidebar History Fill Remaining Height And Re-Refresh After Mount
 - **Choice**: Let the `Transcriptions` panel consume the remaining sidebar height with `height: 1fr` while `Recording Mode` and `Configuration` stay auto-sized, and trigger a second history refresh after the first layout pass on startup.
 - **Reason**: The right column should mirror the left column's behavior, and startup history previews need the same stable width calculation that later refreshes already use.
