@@ -12,6 +12,7 @@ Follow these without question. Do not deviate unless explicitly told.
 - Keep the `Textual` UI in `tui.py` and keep API, recording, and persistence helpers in `main.py` until a larger refactor is requested.
 
 ## API Patterns
+- Never use `assert` for runtime validation in production code (`python -O` strips asserts and missing-API-key errors lose all context). Use `require_stt_client()` / `require_llm_client()` from `main.py` instead of touching the module-level `stt_client` / `llm_client` singletons directly; they raise `RuntimeError` with user-facing messages shared with `validate_api_keys()`.
 - For TUI-triggered transcription work, send progress through the four high-level feedback IDs `compress`, `transcribe`, `post_process`, and `summary`, and use a separate transcript callback to surface raw STT text before post-processing finishes.
 - `process_with_llm(client, messages, llm_model)` accepts pre-built `messages: list[dict]` and does not construct prompts internally. Use `build_post_process_messages`, `build_summary_messages`, or `build_translate_messages` to assemble messages before calling it.
 - The translation sub-template (`{{translate}}` in the post_process user template) is resolved before injection — when no translation is requested, the placeholder is replaced with an empty string, keeping exactly 2 messages to the LLM.

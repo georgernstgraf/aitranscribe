@@ -141,6 +141,12 @@ Each entry documents WHAT was decided and WHY.
 - **Considered**: Appending the user's request to the system prompt (old pattern), or sending 3 messages (system, task, data).
 - **Tradeoff**: Three different message builders are needed (post_process, summary, translate), but each is simple and the assembly logic is clear.
 
+## 2026-08-30: Replace Production Asserts With Typed RuntimeError Helpers
+- **Choice**: All `assert stt_client/llm_client is not None` sites in `main.py` replaced by `require_stt_client()` / `require_llm_client()` helpers that raise `RuntimeError` with user-facing messages; message text lives in `stt_missing_message()` / `llm_missing_message()` and is shared with `validate_api_keys()`.
+- **Reason**: Missing API keys previously raised a raw `AssertionError` with no context. RuntimeErrors surface through the existing `except Exception` handlers in both TUI workers and legacy CLI paths.
+- **Considered**: Inline `if/raise` at each of the 8 sites (duplicates message text), typer.Exit at library level (couples core logic to CLI).
+- **Tradeoff**: Helpers read module-level singletons `stt_client`/`llm_client` at call time, so tests must patch `main.stt_client`/`main.llm_client`.
+
 ## 2026-08-30: Replace pydub With Direct ffmpeg/ffprobe Subprocess Calls
 - **Choice**: Drop the `pydub` dependency entirely; `core.py` calls `ffmpeg`/`ffprobe` via `subprocess` through new `_ffmpeg()` and `_ffprobe()` helpers.
 - **Reason**: pydub is a thin wrapper that shells out to ffmpeg anyway; direct calls remove a dependency and enable stream-copy chunking (`-f segment -c copy`) instead of re-encoding every chunk in Python.

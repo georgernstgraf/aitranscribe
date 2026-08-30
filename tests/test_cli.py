@@ -40,6 +40,10 @@ try:
         CONFIG_FILE,
         stt_client,
         llm_client,
+        require_stt_client,
+        require_llm_client,
+        stt_missing_message,
+        llm_missing_message,
         PROMPTS,
         PromptManager,
     )
@@ -244,6 +248,70 @@ def test_validate_api_keys_success():
         with patch('main.llm_client', MagicMock()):
             validate_api_keys(None)
             validate_api_keys("test prompt")
+
+def test_require_stt_client_returns_client():
+    """Test that require_stt_client returns the client when set."""
+    fake_client = MagicMock()
+    with patch('main.stt_client', fake_client):
+        assert require_stt_client() is fake_client
+
+def test_require_stt_client_raises_when_missing():
+    """Test that require_stt_client raises RuntimeError with a clear message when stt_client is None."""
+    with patch('main.stt_client', None):
+        with pytest.raises(RuntimeError) as exc_info:
+            require_stt_client()
+        assert exc_info.value.args[0] == stt_missing_message()
+        assert "GROQ_API_KEY" in exc_info.value.args[0]
+
+def test_require_llm_client_returns_client():
+    """Test that require_llm_client returns the client when set."""
+    fake_client = MagicMock()
+    with patch('main.llm_client', fake_client):
+        assert require_llm_client() is fake_client
+
+def test_require_llm_client_raises_when_missing():
+    """Test that require_llm_client raises RuntimeError with a clear message when llm_client is None."""
+    with patch('main.llm_client', None):
+        with pytest.raises(RuntimeError) as exc_info:
+            require_llm_client()
+        assert exc_info.value.args[0] == llm_missing_message()
+        assert "API key" in exc_info.value.args[0]
+
+# --- core.process_with_llm guard tests ---
+
+from core import process_with_llm
+
+def _mock_llm_response(choices, content=None):
+    response = MagicMock()
+    response.choices = choices
+    if choices:
+        response.choices[0].message.content = content
+    return response
+
+def test_process_with_llm_strips_content():
+    """Test that process_with_llm strips whitespace from returned content."""
+    client = MagicMock()
+    client.chat.completions.create.return_value = _mock_llm_response(
+        [MagicMock()], content="  hello world  "
+    )
+    assert process_with_llm(client, [{"role": "user", "content": "hi"}], "m") == "hello world"
+
+def test_process_with_llm_none_content_returns_empty():
+    """Test that process_with_llm returns empty string when content is None."""
+    client = MagicMock()
+    client.chat.completions.create.return_value = _mock_llm_response(
+        [MagicMock()], content=None
+    )
+    assert process_with_llm(client, [], "m") == ""
+
+def test_process_with_llm_zero_choices_raises():
+    """Test that process_with_llm raises RuntimeError when the API returns zero choices."""
+    client = MagicMock()
+    client.chat.completions.create.return_value = _mock_llm_response([])
+    with pytest.raises(RuntimeError) as exc_info:
+        process_with_llm(client, [], "test-model")
+    assert "no choices" in exc_info.value.args[0]
+    assert "test-model" in exc_info.value.args[0]
 
 def test_wrap_text_short():
     """Test that wrap_text doesn't wrap short text."""

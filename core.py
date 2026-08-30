@@ -90,5 +90,7 @@ def process_with_llm(client: OpenAI, messages: list[dict], llm_model: str) -> st
         model=llm_model,
         messages=messages
     )
+    if not response.choices:
+        raise RuntimeError(f"LLM returned no choices (model: {llm_model})")
     content = response.choices[0].message.content
-    return content.strip() if content else ""
+    return (content or "").strip()

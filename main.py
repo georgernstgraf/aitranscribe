@@ -502,13 +502,33 @@ def get_recording_file_paths(extension: str = ".mp3") -> tuple[str, str]:
 
 def validate_api_keys(post_process: str | None) -> None:
     if not stt_client:
-        console.print(f"Error: GROQ_API_KEY is not set or invalid in {CONFIG_FILE}.")
+        console.print(f"Error: {stt_missing_message()}")
         raise typer.Exit(code=1)
 
     if post_process and not llm_client:
-        provider_key = LLM_PROVIDERS.get(LLM_PROVIDER, LLM_PROVIDERS["openrouter"])["env_key"]
-        console.print(f"Error: {provider_key} is not set but needed for post-processing. Set LLM_PROVIDER and the corresponding API key in {CONFIG_FILE}.")
+        console.print(f"Error: {llm_missing_message()}")
         raise typer.Exit(code=1)
+
+def stt_missing_message() -> str:
+    return f"GROQ_API_KEY is not set or invalid in {CONFIG_FILE}."
+
+
+def llm_missing_message() -> str:
+    provider_key = LLM_PROVIDERS.get(LLM_PROVIDER, LLM_PROVIDERS["openrouter"])["env_key"]
+    return f"{provider_key} is not set but needed for post-processing. Set LLM_PROVIDER and the corresponding API key in {CONFIG_FILE}."
+
+
+def require_stt_client() -> OpenAI:
+    if stt_client is None:
+        raise RuntimeError(stt_missing_message())
+    return stt_client
+
+
+def require_llm_client() -> OpenAI:
+    if llm_client is None:
+        raise RuntimeError(llm_missing_message())
+    return llm_client
+
 
 def wrap_text(text: str, max_length: int = 80) -> str:
     """Wrap text to specified max length, breaking at whitespace."""
@@ -849,8 +869,7 @@ def process_recorded_audio_for_tui(
             os.remove(raw_wav_file)
 
         update_feedback("transcribe", "active")
-        assert stt_client is not None
-        transcript = transcribe_audio(stt_client, final_mp3_file, str(settings.get("stt_model", GROQ_STT_MODEL)))
+        transcript = transcribe_audio(require_stt_client(), final_mp3_file, str(settings.get("stt_model", GROQ_STT_MODEL)))
         if transcript_callback:
             transcript_callback(transcript)
         update_feedback("transcribe", "done")
@@ -858,9 +877,8 @@ def process_recorded_audio_for_tui(
         final_text = transcript
         if needs_llm:
             update_feedback("post_process", "active")
-            assert llm_client is not None
             messages = build_post_process_messages(transcript, target_language)
-            final_text = process_with_llm(llm_client, messages, str(settings.get("llm_model", LLM_MODEL)))
+            final_text = process_with_llm(require_llm_client(), messages, str(settings.get("llm_model", LLM_MODEL)))
             update_feedback("post_process", "done")
         else:
             update_feedback("post_process", "done")
@@ -926,8 +944,7 @@ def process_file_for_tui(
         chunks = chunk_audio(file_for_processing)
         transcripts = []
         for chunk_path in chunks:
-            assert stt_client is not None
-            transcripts.append(transcribe_audio(stt_client, chunk_path, str(settings.get("stt_model", GROQ_STT_MODEL))))
+            transcripts.append(transcribe_audio(require_stt_client(), chunk_path, str(settings.get("stt_model", GROQ_STT_MODEL))))
             if chunk_path != file_for_processing:
                 os.remove(chunk_path)
         raw_text = " ".join(text for text in transcripts if text).strip()
@@ -938,9 +955,8 @@ def process_file_for_tui(
         final_text = raw_text
         if needs_llm:
             update_feedback("post_process", "active")
-            assert llm_client is not None
             messages = build_post_process_messages(raw_text, target_language)
-            final_text = process_with_llm(llm_client, messages, str(settings.get("llm_model", LLM_MODEL)))
+            final_text = process_with_llm(require_llm_client(), messages, str(settings.get("llm_model", LLM_MODEL)))
             update_feedback("post_process", "done")
         else:
             update_feedback("post_process", "done")
@@ -1111,8 +1127,7 @@ def transcribe_file(file_path: str, stt_model: str, llm_model: str, post_process
             full_transcript = []
             for i, chunk_path in enumerate(chunks):
                 progress.update(progress.task_ids[0], description=f"Transcribing chunk {i+1}/{len(chunks)}...")
-                assert stt_client is not None
-                transcript = transcribe_audio(stt_client, chunk_path, stt_model)
+                transcript = transcribe_audio(require_stt_client(), chunk_path, stt_model)
                 full_transcript.append(transcript)
 
                 # Cleanup chunks if they were created
@@ -1134,9 +1149,8 @@ def transcribe_file(file_path: str, stt_model: str, llm_model: str, post_process
                 console=console
             ) as progress:
                 progress.add_task(description="Processing with LLM...", total=None)
-                assert llm_client is not None
                 messages = build_post_process_messages(final_text, target_language)
-                llm_result = process_with_llm(llm_client, messages, llm_model)
+                llm_result = process_with_llm(require_llm_client(), messages, llm_model)
 
             console.print("\nLLM Result:")
             console.print(wrap_text(llm_result))
@@ -1359,8 +1373,7 @@ def record_from_microphone(stt_model: str, llm_model: str, post_process: bool, v
             console.print(f"Audio saved to {final_mp3_file}")
 
             progress.add_task(description="Transcribing audio...", total=None)
-            assert stt_client is not None
-            transcript = transcribe_audio(stt_client, final_mp3_file, stt_model)
+            transcript = transcribe_audio(require_stt_client(), final_mp3_file, stt_model)
 
         console.print("\nTranscription Complete:")
         console.print(wrap_text(transcript))
@@ -1375,9 +1388,8 @@ def record_from_microphone(stt_model: str, llm_model: str, post_process: bool, v
                 console=console
             ) as progress:
                 progress.add_task(description="Processing with LLM...", total=None)
-                assert llm_client is not None
                 messages = build_post_process_messages(transcript, target_language)
-                llm_result = process_with_llm(llm_client, messages, llm_model)
+                llm_result = process_with_llm(require_llm_client(), messages, llm_model)
 
             console.print("\nLLM Result:")
             console.print(wrap_text(llm_result))
