@@ -1446,27 +1446,15 @@ def _record_until_toggle(
         _restore_terminal_mode(fd, old_settings)
 
 
-def record_from_microphone(stt_model: str, llm_model: str, post_process: bool, verbose: bool, english: bool):
-    """Record audio from microphone in toggle mode and transcribe it using Groq."""
-    if verbose:
-        state["verbose"] = True
+def _capture_microphone_recording(
+    verbose: bool, samplerate: int = 44100, channels: int = 1
+) -> np.ndarray | None:
+    """Run toggle-mode microphone capture.
 
-    target_language = "English" if english else None
-    needs_llm = english or post_process
-
-    validate_api_keys("post_process" if needs_llm else None)
-
-    samplerate = 44100
-    channels = 1
-    audio_data = []
-
-    console.print("Toggle Recording")
-    console.print(f"STT Provider: Groq")
-    console.print(f"STT Model: {stt_model}")
-    if needs_llm:
-        console.print(f"LLM Provider: {LLM_PROVIDER}")
-        console.print(f"LLM Model: {llm_model}")
-
+    Returns the recorded audio as a numpy array, or None if the user
+    cancelled or no audio was captured. Raises typer.Exit(1) when no
+    keyboard input mechanism is available.
+    """
     console.print("Press SPACE to start recording. Press SPACE again to stop. Press ESC to cancel.")
 
     recording_state = {
@@ -1485,21 +1473,62 @@ def record_from_microphone(stt_model: str, llm_model: str, post_process: bool, v
             console.print(f"Error: Could not set up keyboard input.")
             raise typer.Exit(code=1)
 
+    audio_data: list[Any] = []
     _record_until_toggle(recording_state, listener, fd, old_settings, audio_data, samplerate, channels)
 
     if recording_state["cancelled"]:
-        return
+        return None
 
     if not audio_data:
         console.print("No audio recorded. Exiting.")
-        return
+        return None
 
-    # Convert to numpy array
-    audio_np = np.concatenate(audio_data, axis=0)
+    return np.concatenate(audio_data, axis=0)
+
+
+def _persist_recording(raw_wav_file: str, final_mp3_file: str) -> None:
+    """Compress the recorded WAV to MP3 and clean up the raw WAV."""
+    compress_audio(raw_wav_file, output_path=final_mp3_file)
+    if os.path.exists(raw_wav_file):
+        os.remove(raw_wav_file)
+
+
+def _report_recording_result(final_text: str, transcript: str, needs_llm: bool, mp3_file: str) -> None:
+    """Print transcription results and store the final text in the prompt queue."""
+    console.print("\nTranscription Complete:")
+    console.print(wrap_text(transcript))
+
+    if needs_llm:
+        console.print("\nLLM Result:")
+        console.print(wrap_text(final_text))
+
+    prompt_manager.add_prompt(final_text, mp3_file)
+
+
+def record_from_microphone(stt_model: str, llm_model: str, post_process: bool, verbose: bool, english: bool):
+    """Record audio from microphone in toggle mode and transcribe it using Groq."""
+    if verbose:
+        state["verbose"] = True
+
+    target_language = "English" if english else None
+    needs_llm = english or post_process
+
+    validate_api_keys("post_process" if needs_llm else None)
+
+    console.print("Toggle Recording")
+    console.print(f"STT Provider: Groq")
+    console.print(f"STT Model: {stt_model}")
+    if needs_llm:
+        console.print(f"LLM Provider: {LLM_PROVIDER}")
+        console.print(f"LLM Model: {llm_model}")
+
+    audio_np = _capture_microphone_recording(verbose)
+    if audio_np is None:
+        return
 
     raw_wav_file, final_mp3_file = get_recording_file_paths(".mp3")
 
-    _write_wav(raw_wav_file, audio_np, samplerate)
+    _write_wav(raw_wav_file, audio_np, 44100)
 
     try:
         with Progress(
@@ -1509,11 +1538,7 @@ def record_from_microphone(stt_model: str, llm_model: str, post_process: bool, v
         ) as progress:
             # First, compress WAV to MP3 to save bandwidth and potentially tokens
             progress.add_task(description="Compressing audio...", total=None)
-            compress_audio(raw_wav_file, output_path=final_mp3_file)
-
-            # Clean up the raw wav now that we have the mp3
-            if os.path.exists(raw_wav_file):
-                os.remove(raw_wav_file)
+            _persist_recording(raw_wav_file, final_mp3_file)
 
             console.print(f"Audio saved to {final_mp3_file}")
 
@@ -1527,15 +1552,7 @@ def record_from_microphone(stt_model: str, llm_model: str, post_process: bool, v
                 on_progress=lambda message: progress.update(progress.task_ids[0], description=message),
             )
 
-        console.print("\nTranscription Complete:")
-        console.print(wrap_text(transcript))
-
-        if needs_llm:
-            console.print("\nLLM Result:")
-            console.print(wrap_text(final_text))
-
-        # Store post-processed or raw transcription in prompt queue
-        prompt_manager.add_prompt(final_text, final_mp3_file)
+        _report_recording_result(final_text, transcript, needs_llm, final_mp3_file)
 
     except Exception as e:
         console.print(f"An error occurred: {str(e)}")
