@@ -17,7 +17,7 @@ from textual.containers import Horizontal, Vertical
 from textual.events import Resize
 from textual.message import Message
 from textual.widgets import Footer, Header, Input, Label, OptionList, RadioButton, RadioSet, Static, TextArea
-from textual.widgets.option_list import Option
+from textual.widgets.option_list import Option, OptionDoesNotExist
 
 
 FeedbackCallback = Callable[[str, str], None]
@@ -623,6 +623,14 @@ class AitranscribeTUI(App[None]):
             lines.append(f"{prefix} {label}")
         self.query_one("#feedback_panel", Static).update(Text("\n".join(lines), no_wrap=True, overflow="crop"))
 
+    def _history_option_label(self, prompt: dict, available_width: int) -> str:
+        summary_text = str(prompt.get("summary") or "").strip()
+        preview_source = summary_text or str(prompt["prompt"])
+        prefix = f"#{prompt['id']}: "
+        text_width = max(8, available_width - len(prefix))
+        shortened = textwrap.shorten(preview_source.replace("\n", " "), width=text_width, placeholder=" ...")
+        return f"{prefix}{shortened}"
+
     def refresh_history(self) -> None:
         count = self.prompt_manager.count_prompts()
         history_list = self.query_one("#history_list", OptionList)
@@ -639,12 +647,7 @@ class AitranscribeTUI(App[None]):
         options = []
         selected_index: int | None = None
         for index, prompt in enumerate(self.history_prompts):
-            summary_text = str(prompt.get("summary") or "").strip()
-            preview_source = summary_text or str(prompt["prompt"])
-            prefix = f"#{prompt['id']}: "
-            text_width = max(8, available_width - len(prefix))
-            shortened = textwrap.shorten(preview_source.replace("\n", " "), width=text_width, placeholder=" ...")
-            options.append(Option(f"#{prompt['id']}: {shortened}", id=f"history-{prompt['id']}"))
+            options.append(Option(self._history_option_label(prompt, available_width), id=f"history-{prompt['id']}"))
             if prompt["id"] == self.selected_history_id:
                 selected_index = index
 
@@ -656,6 +659,20 @@ class AitranscribeTUI(App[None]):
             if history_list.highlighted is None or history_list.highlighted >= len(options):
                 history_list.highlighted = 0
             self.select_history_prompt(history_list.highlighted)
+
+    def apply_summary_to_history(self, prompt_id: int, summary: str) -> None:
+        """Update one history entry's summary preview without touching the editor."""
+        prompt = next((p for p in self.history_prompts if p["id"] == prompt_id), None)
+        if prompt is None:
+            return
+        prompt["summary"] = summary
+        history_list = self.query_one("#history_list", OptionList)
+        option_id = f"history-{prompt_id}"
+        try:
+            history_list.get_option(option_id)
+        except OptionDoesNotExist:
+            return
+        history_list.replace_option_prompt(option_id, self._history_option_label(prompt, self._history_preview_width()))
 
     def _history_preview_width(self) -> int:
         history_list = self.query_one("#history_list", OptionList)
@@ -952,7 +969,7 @@ class AitranscribeTUI(App[None]):
         updated = self.prompt_manager.update_prompt_summary(prompt_id, summary)
         if updated:
             self.call_from_thread(self.update_feedback_state, "summary", "done")
-            self.call_from_thread(self.refresh_history)
+            self.call_from_thread(self.apply_summary_to_history, prompt_id, summary)
         else:
             self.call_from_thread(self.update_feedback_state, "summary", "error")
 

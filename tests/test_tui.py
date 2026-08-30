@@ -934,3 +934,103 @@ async def test_processing_finished_starts_background_summary_generation_for_save
         await app.workers.wait_for_complete()
 
     prompt_manager.update_prompt_summary.assert_called_with(7, "Generated summary")
+
+
+@pytest.mark.anyio
+async def test_summary_completion_does_not_clobber_editor_edits():
+    import threading
+
+    prompt_manager = Mock()
+    prompt_manager.count_prompts.return_value = 1
+    prompt_manager.recent_prompts.return_value = [
+        {"id": 7, "prompt": "Stored transcript", "filename": "a.mp3", "timestamp": "2026-03-09T11:00:00", "summary": None},
+    ]
+    prompt_manager.update_prompt_summary.return_value = True
+
+    release = threading.Event()
+
+    def slow_summary(prompt_text: str, model: str) -> str:
+        release.wait(timeout=5)
+        return "Crisp summary"
+
+    app = AitranscribeTUI(
+        prompt_manager=prompt_manager,
+        process_audio=Mock(),
+        process_file=Mock(),
+        stt_provider_name="Groq",
+        llm_provider_name="openrouter",
+        default_stt_model="whisper",
+        default_llm_model="gpt",
+        initial_settings={"pre_process_mode": "english", "input_source": "microphone"},
+        generate_summary=Mock(side_effect=slow_summary),
+    )
+
+    async with app.run_test() as pilot:
+        app.processing_finished({"text": "Fresh transcript", "file_path": "/tmp/a.mp3", "prompt_id": "7"})
+        await pilot.pause()
+        editor = app.query_one("#transcript_editor", TextArea)
+        editor.text = "User typed edits"
+        release.set()
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+
+        assert editor.text == "User typed edits"
+        history_list = app.query_one("#history_list", OptionList)
+        assert "Crisp summary" in str(history_list.get_option("history-7").prompt)
+
+
+@pytest.mark.anyio
+async def test_apply_summary_to_history_updates_option_without_selection_change():
+    prompt_manager = Mock()
+    prompt_manager.count_prompts.return_value = 1
+    prompt_manager.recent_prompts.return_value = [
+        {"id": 7, "prompt": "Stored transcript", "filename": "a.mp3", "timestamp": "2026-03-09T11:00:00", "summary": None},
+    ]
+
+    app = AitranscribeTUI(
+        prompt_manager=prompt_manager,
+        process_audio=Mock(),
+        process_file=Mock(),
+        stt_provider_name="Groq",
+        llm_provider_name="openrouter",
+        default_stt_model="whisper",
+        default_llm_model="gpt",
+        initial_settings={"pre_process_mode": "english", "input_source": "microphone"},
+    )
+
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        app.apply_summary_to_history(7, "Crisp summary")
+        await pilot.pause()
+
+        history_list = app.query_one("#history_list", OptionList)
+        assert "Crisp summary" in str(history_list.get_option("history-7").prompt)
+        assert app.selected_history_text == "Stored transcript"
+
+
+@pytest.mark.anyio
+async def test_apply_summary_to_history_ignores_unknown_prompt_id():
+    prompt_manager = Mock()
+    prompt_manager.count_prompts.return_value = 1
+    prompt_manager.recent_prompts.return_value = [
+        {"id": 7, "prompt": "Stored transcript", "filename": "a.mp3", "timestamp": "2026-03-09T11:00:00", "summary": None},
+    ]
+
+    app = AitranscribeTUI(
+        prompt_manager=prompt_manager,
+        process_audio=Mock(),
+        process_file=Mock(),
+        stt_provider_name="Groq",
+        llm_provider_name="openrouter",
+        default_stt_model="whisper",
+        default_llm_model="gpt",
+        initial_settings={"pre_process_mode": "english", "input_source": "microphone"},
+    )
+
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        app.apply_summary_to_history(999, "Orphan summary")
+        await pilot.pause()
+
+        history_list = app.query_one("#history_list", OptionList)
+        assert "Orphan summary" not in str(history_list.get_option("history-7").prompt)
