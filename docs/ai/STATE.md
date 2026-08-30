@@ -13,7 +13,7 @@ Code audit remediation (#63) complete: #62/#67–#72 all done and closed; #63 re
 - [x] #69 done: tests/test_core.py full core.py coverage (0892e80)
 - [x] #68 fixed: 8 production asserts → require_stt_client()/require_llm_client() RuntimeError helpers (e153be4)
 - [x] #62 fixed: summary completion no longer overwrites editor edits
-- [x] #63 split into sub-issues #68–#72, all linked via Sub-Issues API; pydub → ffmpeg refactor (aa50dd9, issue #66)
+- [x] #63 split into sub-issues #68–#72, all linked via Sub-Issues API; pydub → ffmpeg refactor (aa50dd9, issue #66 — closed 2026-08-30)
 
 ## Pending
 - [x] User verified: legacy mic recording, live TUI recording (#71 restructure), and terminal title (#67) all work
