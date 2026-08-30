@@ -46,12 +46,19 @@ Follow these without question. Do not deviate unless explicitly told.
 
 ## Error Handling
 - Never use `pass` in an `except` block — exceptions must always be user-visible.
+- `PromptManager` methods must never catch-and-default on DB errors: let `sqlite3.Error` propagate. Callers own the UI treatment (ErrorDialog in TUI, console + exit in CLI). Empty-queue returns (`None`/`False`/`[]`) are legitimate values, not error signals.
 - In TUI mode, use `ErrorDialog(title, message, detail, fatal)` for errors the user must acknowledge.
   - `fatal=True`: config/setup errors → app exits after OK.
   - `fatal=False`: transient errors (network, transcription) → app continues.
 - In CLI mode, use `console.print()` for warnings/errors.
 - In `core.py` library functions, let exceptions propagate to callers who decide the UI treatment.
 - Windows-only DLL path additions (`os.add_dll_directory`) are exempt — they are expected failures on non-Windows.
+
+## Config
+- Config migration matches keys via `dotenv_values` (comments ignored), never via substring search on file text — a commented-out `# KEY=...` line must not count as present.
+- Migration additions are appended in a single write using the `_MIGRATION_BLOCKS` table in `main.py`.
+- TUI inputs (`PersistInput`) persist to config on blur or Enter (submit), never per keystroke; `Input.Changed` only marks inputs dirty.
+- `typer.Exit` inherits from `Exception` — never wrap CLI exit-raising blocks in `except Exception`; catch the specific error type (e.g. `sqlite3.Error`).
 
 ## Testing
 - Cover TUI integration points from the CLI layer with focused unit tests instead of trying to run an interactive terminal session in `pytest`.

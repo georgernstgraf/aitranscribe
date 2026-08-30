@@ -7,6 +7,8 @@ Read this file carefully before making changes in affected areas.
 - Do not pass Markdown backticks unescaped inside `gh issue create --body "..."`; the shell will treat them as command substitution.
 - `runner.invoke(app, [])` does not preserve a reliable `sys.argv` shape for default-mode detection, so default TUI launch logic must be inferred from parsed option values instead.
 - Typer evaluates `main()` signature defaults at import time. Any option default that depends on initialized state must be `None` at import and resolved inside `main()` after `init_app()`; a direct global default (e.g. `typer.Option(GROQ_STT_MODEL, ...)`) silently bakes in `None`.
+- Textual 8.x `Focus`/`Blur` events do NOT bubble — an app-level `on_blur` never fires for Input blur. To react to widget blur, subclass the widget and post a custom bubbling Message from its `on_blur` (see `PersistInput` in tui.py).
+- `typer.Exit` inherits from `Exception` (via `click.exceptions.Exit`). An `except Exception` around a block that raises `typer.Exit` converts clean exits into error exits — catch specific errors instead.
 - `main.init_app()` mutates a dozen module globals. Tests calling it directly must snapshot/restore `_INIT_GLOBALS` (see `tests/test_cli.py`) or later tests fail with `KeyError` on `PROMPTS` subkeys.
 - Manual testing of `main.py` default startup still requires a real terminal and microphone access; automated tests only cover the non-interactive seams.
 - A fullscreen terminal UI built on the current library does not satisfy the requirement that transcript text must remain mouse-selectable for copy/paste into other applications.

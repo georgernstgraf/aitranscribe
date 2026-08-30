@@ -97,45 +97,27 @@ def _create_default_config() -> None:
     console.print(f"Created configuration at {CONFIG_FILE}")
     console.print("Please edit this file to add your API keys before running the tool.")
 
+_MIGRATION_BLOCKS: list[tuple[str, str]] = [
+    ("GROQ_API_KEY", '\n# Added during migration\nGROQ_API_KEY="your_groq_api_key_here"\nGROQ_STT_MODEL="whisper-large-v3-turbo"\n'),
+    ("LLM_PROVIDER", '\n# Added during multi-provider migration\nLLM_PROVIDER="openrouter"\n'),
+    ("COHERE_API_KEY", '\n# Cohere (alternative provider)\n# COHERE_API_KEY="your_cohere_api_key_here"\n# COHERE_LLM_MODEL="command-r"\n'),
+    ("ZAI_API_KEY", '\n# z.ai (alternative provider)\n# ZAI_API_KEY="your_zai_api_key_here"\n# ZAI_LLM_MODEL="glm-5"\n'),
+    ("GOOGLE_API_KEY", '\n# Google (alternative provider)\n# GOOGLE_API_KEY="your_google_api_key_here"\n# GOOGLE_LLM_MODEL="gemini-2.0-flash"\n'),
+    ("PRE_PROCESS_MODE", '\n# TUI Defaults\nPRE_PROCESS_MODE="english"\n'),
+    ("TRANSCRIBE_SOURCE", 'TRANSCRIBE_SOURCE="microphone"\n'),
+    ("LAST_FILE_PATH", 'LAST_FILE_PATH=""\n'),
+    ("VERBOSE_ERRORS", 'VERBOSE_ERRORS="false"\n'),
+]
+
 def _migrate_config() -> None:
-    config_text = CONFIG_FILE.read_text()
-    if "GROQ_API_KEY" not in config_text:
-        with open(CONFIG_FILE, "a") as f:
-            f.write('\n# Added during migration\n')
-            f.write('GROQ_API_KEY="your_groq_api_key_here"\n')
-            f.write('GROQ_STT_MODEL="whisper-large-v3-turbo"\n')
-    if "LLM_PROVIDER" not in config_text:
-        with open(CONFIG_FILE, "a") as f:
-            f.write('\n# Added during multi-provider migration\n')
-            f.write('LLM_PROVIDER="openrouter"\n')
-    if "COHERE_API_KEY" not in config_text:
-        with open(CONFIG_FILE, "a") as f:
-            f.write('\n# Cohere (alternative provider)\n')
-            f.write('# COHERE_API_KEY="your_cohere_api_key_here"\n')
-            f.write('# COHERE_LLM_MODEL="command-r"\n')
-    if "ZAI_API_KEY" not in config_text:
-        with open(CONFIG_FILE, "a") as f:
-            f.write('\n# z.ai (alternative provider)\n')
-            f.write('# ZAI_API_KEY="your_zai_api_key_here"\n')
-            f.write('# ZAI_LLM_MODEL="glm-5"\n')
-    if "GOOGLE_API_KEY" not in config_text:
-        with open(CONFIG_FILE, "a") as f:
-            f.write('\n# Google (alternative provider)\n')
-            f.write('# GOOGLE_API_KEY="your_google_api_key_here"\n')
-            f.write('# GOOGLE_LLM_MODEL="gemini-2.0-flash"\n')
-    if "PRE_PROCESS_MODE" not in config_text:
-        with open(CONFIG_FILE, "a") as f:
-            f.write('\n# TUI Defaults\n')
-            f.write('PRE_PROCESS_MODE="english"\n')
-    if "TRANSCRIBE_SOURCE" not in config_text:
-        with open(CONFIG_FILE, "a") as f:
-            f.write('TRANSCRIBE_SOURCE="microphone"\n')
-    if "LAST_FILE_PATH" not in config_text:
-        with open(CONFIG_FILE, "a") as f:
-            f.write('LAST_FILE_PATH=""\n')
-    if "VERBOSE_ERRORS" not in config_text:
-        with open(CONFIG_FILE, "a") as f:
-            f.write('VERBOSE_ERRORS="false"\n')
+    # dotenv_values ignores comments, so a commented-out `# GROQ_API_KEY=...`
+    # line no longer counts as present (old substring check did).
+    existing_keys = {key for key, value in dotenv_values(CONFIG_FILE).items() if value is not None}
+    additions = "".join(block for key, block in _MIGRATION_BLOCKS if key not in existing_keys)
+    if not additions:
+        return
+    with open(CONFIG_FILE, "a") as f:
+        f.write(additions)
 
 # Populated by init_app(); import must stay side-effect-free.
 _initialized = False
@@ -556,47 +538,44 @@ class PromptManager:
         return conn
 
     def _initialize_db(self) -> None:
-        try:
-            with self._connect() as conn:
-                columns = conn.execute("PRAGMA table_info(prompts)").fetchall()
-                if not columns:
-                    conn.execute(
-                        """
-                        CREATE TABLE IF NOT EXISTS prompts (
-                            id INTEGER PRIMARY KEY AUTOINCREMENT,
-                            prompt TEXT NOT NULL,
-                            filename TEXT NOT NULL,
-                            created_at TEXT NOT NULL,
-                            summary TEXT DEFAULT NULL
-                        )
-                        """
+        with self._connect() as conn:
+            columns = conn.execute("PRAGMA table_info(prompts)").fetchall()
+            if not columns:
+                conn.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS prompts (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        prompt TEXT NOT NULL,
+                        filename TEXT NOT NULL,
+                        created_at TEXT NOT NULL,
+                        summary TEXT DEFAULT NULL
                     )
-                elif any(column[1] == "played_count" for column in columns):
-                    conn.execute("ALTER TABLE prompts RENAME TO prompts_legacy")
-                    conn.execute(
-                        """
-                        CREATE TABLE prompts (
-                            id INTEGER PRIMARY KEY AUTOINCREMENT,
-                            prompt TEXT NOT NULL,
-                            filename TEXT NOT NULL,
-                            created_at TEXT NOT NULL,
-                            summary TEXT DEFAULT NULL
-                        )
-                        """
+                    """
+                )
+            elif any(column[1] == "played_count" for column in columns):
+                conn.execute("ALTER TABLE prompts RENAME TO prompts_legacy")
+                conn.execute(
+                    """
+                    CREATE TABLE prompts (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        prompt TEXT NOT NULL,
+                        filename TEXT NOT NULL,
+                        created_at TEXT NOT NULL,
+                        summary TEXT DEFAULT NULL
                     )
-                    conn.execute(
-                        """
-                        INSERT INTO prompts (id, prompt, filename, created_at, summary)
-                        SELECT id, prompt, filename, created_at, NULL
-                        FROM prompts_legacy
-                        ORDER BY id ASC
-                        """
-                    )
-                    conn.execute("DROP TABLE prompts_legacy")
-                elif not any(column[1] == "summary" for column in columns):
-                    conn.execute("ALTER TABLE prompts ADD COLUMN summary TEXT DEFAULT NULL")
-        except Exception as e:
-            console.print(f"Warning: Could not initialize prompts database: {e}")
+                    """
+                )
+                conn.execute(
+                    """
+                    INSERT INTO prompts (id, prompt, filename, created_at, summary)
+                    SELECT id, prompt, filename, created_at, NULL
+                    FROM prompts_legacy
+                    ORDER BY id ASC
+                    """
+                )
+                conn.execute("DROP TABLE prompts_legacy")
+            elif not any(column[1] == "summary" for column in columns):
+                conn.execute("ALTER TABLE prompts ADD COLUMN summary TEXT DEFAULT NULL")
 
     @property
     def prompts(self) -> list[dict[str, Any]]:
@@ -614,114 +593,86 @@ class PromptManager:
             query += " LIMIT ?"
             params = (limit,)
 
-        try:
-            with self._connect() as conn:
-                cursor = conn.execute(query, params)
-                rows = cursor.fetchall()
-                return [
-                    {
-                        "id": row[0],
-                        "prompt": row[1],
-                        "filename": row[2],
-                        "timestamp": row[3],
-                        "summary": row[4],
-                    }
-                    for row in rows
-                ]
-        except Exception as e:
-            console.print(f"Warning: Could not query prompts database: {e}")
-            return []
+        with self._connect() as conn:
+            cursor = conn.execute(query, params)
+            rows = cursor.fetchall()
+            return [
+                {
+                    "id": row[0],
+                    "prompt": row[1],
+                    "filename": row[2],
+                    "timestamp": row[3],
+                    "summary": row[4],
+                }
+                for row in rows
+            ]
 
     def recent_prompts(self, limit: int | None = None) -> list[dict[str, Any]]:
         return self._get_prompts(order="DESC", limit=limit)
 
     def count_prompts(self) -> int:
-        try:
-            with self._connect() as conn:
-                row = conn.execute("SELECT COUNT(*) FROM prompts").fetchone()
-                return int(row[0]) if row else 0
-        except Exception as e:
-            console.print(f"Warning: Could not count prompts: {e}")
-            return 0
+        with self._connect() as conn:
+            row = conn.execute("SELECT COUNT(*) FROM prompts").fetchone()
+            return int(row[0]) if row else 0
 
     def add_prompt(self, prompt: str, filename: str, summary: str | None = None) -> int | None:
         """Add a new prompt to the queue."""
         created_at = datetime.datetime.now().isoformat()
-        try:
-            with self._connect() as conn:
-                cursor = conn.execute(
-                    """
-                    INSERT INTO prompts (prompt, filename, created_at, summary)
-                    VALUES (?, ?, ?, ?)
-                    """,
-                    (prompt, filename, created_at, summary),
-                )
-                lastrowid = cursor.lastrowid
-                return int(lastrowid) if lastrowid is not None else None
-        except Exception as e:
-            console.print(f"Warning: Could not store prompt: {e}")
-            return None
+        with self._connect() as conn:
+            cursor = conn.execute(
+                """
+                INSERT INTO prompts (prompt, filename, created_at, summary)
+                VALUES (?, ?, ?, ?)
+                """,
+                (prompt, filename, created_at, summary),
+            )
+            lastrowid = cursor.lastrowid
+            return int(lastrowid) if lastrowid is not None else None
 
     def update_prompt(self, prompt_id: int, prompt: str) -> bool:
         """Update a stored prompt by database id."""
-        try:
-            with self._connect() as conn:
-                cursor = conn.execute(
-                    "UPDATE prompts SET prompt = ? WHERE id = ?",
-                    (prompt, prompt_id),
-                )
-                return cursor.rowcount > 0
-        except Exception as e:
-            console.print(f"Warning: Could not update prompt: {e}")
-            return False
+        with self._connect() as conn:
+            cursor = conn.execute(
+                "UPDATE prompts SET prompt = ? WHERE id = ?",
+                (prompt, prompt_id),
+            )
+            return cursor.rowcount > 0
 
     def update_prompt_summary(self, prompt_id: int, summary: str) -> bool:
         """Update a stored prompt summary by database id."""
-        try:
-            with self._connect() as conn:
-                cursor = conn.execute(
-                    "UPDATE prompts SET summary = ? WHERE id = ?",
-                    (summary, prompt_id),
-                )
-                return cursor.rowcount > 0
-        except Exception as e:
-            console.print(f"Warning: Could not update prompt summary: {e}")
-            return False
+        with self._connect() as conn:
+            cursor = conn.execute(
+                "UPDATE prompts SET summary = ? WHERE id = ?",
+                (summary, prompt_id),
+            )
+            return cursor.rowcount > 0
 
     def prompts_missing_summary(self) -> list[dict[str, Any]]:
-        try:
-            with self._connect() as conn:
-                rows = conn.execute(
-                    """
-                    SELECT id, prompt, filename, created_at, summary
-                    FROM prompts
-                    WHERE summary IS NULL OR TRIM(summary) = ''
-                    ORDER BY created_at DESC, id DESC
-                    """
-                ).fetchall()
-                return [
-                    {
-                        "id": row[0],
-                        "prompt": row[1],
-                        "filename": row[2],
-                        "timestamp": row[3],
-                        "summary": row[4],
-                    }
-                    for row in rows
-                ]
-        except Exception as e:
-            console.print(f"Warning: Could not query prompts missing summary: {e}")
-            return []
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT id, prompt, filename, created_at, summary
+                FROM prompts
+                WHERE summary IS NULL OR TRIM(summary) = ''
+                ORDER BY created_at DESC, id DESC
+                """
+            ).fetchall()
+            return [
+                {
+                    "id": row[0],
+                    "prompt": row[1],
+                    "filename": row[2],
+                    "timestamp": row[3],
+                    "summary": row[4],
+                }
+                for row in rows
+            ]
 
     def remove_prompt_by_id(self, prompt_id: int) -> bool:
         """Remove a stored prompt by database id."""
-        try:
-            with self._connect() as conn:
-                cursor = conn.execute("DELETE FROM prompts WHERE id = ?", (prompt_id,))
-                return cursor.rowcount > 0
-        except Exception as e:
-            console.print(f"Warning: Could not remove prompt: {e}")
-            return False
+        with self._connect() as conn:
+            cursor = conn.execute("DELETE FROM prompts WHERE id = ?", (prompt_id,))
+            return cursor.rowcount > 0
 
     def list_prompts(self) -> None:
         """List all stored prompts in queue order."""
@@ -738,26 +689,22 @@ class PromptManager:
 
     def query_prompt(self) -> str | None:
         """Get and remove the oldest stored prompt."""
-        try:
-            with self._connect() as conn:
-                cursor = conn.execute(
-                    """
-                    SELECT id, prompt
-                    FROM prompts
-                    ORDER BY id ASC
-                    LIMIT 1
-                    """
-                )
-                row = cursor.fetchone()
-                if not row:
-                    console.print("No prompts in queue.")
-                    return None
+        with self._connect() as conn:
+            cursor = conn.execute(
+                """
+                SELECT id, prompt
+                FROM prompts
+                ORDER BY id ASC
+                LIMIT 1
+                """
+            )
+            row = cursor.fetchone()
+            if not row:
+                console.print("No prompts in queue.")
+                return None
 
-                conn.execute("DELETE FROM prompts WHERE id = ?", (row[0],))
-                return row[1]
-        except Exception as e:
-            console.print(f"Warning: Could not query prompt: {e}")
-            return None
+            conn.execute("DELETE FROM prompts WHERE id = ?", (row[0],))
+            return row[1]
 
     def remove_prompt(self, index: int) -> bool:
         """Remove a stored prompt by its 1-based --list index."""
@@ -771,16 +718,12 @@ class PromptManager:
             return False
 
         removed_prompt = stored_prompts[index - 1]
-        try:
-            removed = self.remove_prompt_by_id(int(removed_prompt["id"]))
-            if removed:
-                console.print(f"Removed prompt {index}: {removed_prompt['prompt'][:50]}...")
-                return True
-            console.print(f"Warning: Could not remove prompt {index}.")
-            return False
-        except Exception as e:
-            console.print(f"Warning: Could not remove prompt: {e}")
-            return False
+        removed = self.remove_prompt_by_id(int(removed_prompt["id"]))
+        if removed:
+            console.print(f"Removed prompt {index}: {removed_prompt['prompt'][:50]}...")
+            return True
+        console.print(f"Warning: Could not remove prompt {index}.")
+        return False
 
 
 def generate_prompt_summary(text: str, llm_model: str) -> str | None:
@@ -1154,19 +1097,25 @@ def main(
         raise typer.Exit(code=1)
 
     # Handle prompt management commands
-    if list_prompts:
-        prompt_manager.list_prompts()
-        raise typer.Exit(code=0)
+    try:
+        if list_prompts:
+            prompt_manager.list_prompts()
+            raise typer.Exit(code=0)
 
-    if remove_prompt is not None:
-        prompt_manager.remove_prompt(remove_prompt)
-        raise typer.Exit(code=0)
+        if remove_prompt is not None:
+            prompt_manager.remove_prompt(remove_prompt)
+            raise typer.Exit(code=0)
 
-    if query_prompt:
-        retrieved_prompt = prompt_manager.query_prompt()
-        if retrieved_prompt:
-            console.print(wrap_text(retrieved_prompt))
-        raise typer.Exit(code=0)
+        if query_prompt:
+            retrieved_prompt = prompt_manager.query_prompt()
+            if retrieved_prompt:
+                console.print(wrap_text(retrieved_prompt))
+            raise typer.Exit(code=0)
+    except sqlite3.Error as e:
+        console.print(f"Error: Prompt database operation failed: {e}")
+        if state["verbose"]:
+            console.print_exception()
+        raise typer.Exit(code=1)
 
     if file:
         transcribe_file(file, stt_model, llm_model, post_process, verbose, english)

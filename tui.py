@@ -16,7 +16,7 @@ from textual.screen import ModalScreen
 from textual.containers import Horizontal, Vertical
 from textual.events import Resize
 from textual.message import Message
-from textual.widgets import Footer, Header, Input, Label, OptionList, RadioButton, RadioSet, Static, TextArea
+from textual.widgets import Button, Footer, Header, Input, Label, OptionList, RadioButton, RadioSet, Static, TextArea
 from textual.widgets.option_list import Option, OptionDoesNotExist
 
 
@@ -29,7 +29,7 @@ TranslateCallback = Callable[[str, str, str], str | None]
 BackfillSummariesCallback = Callable[[], int]
 
 
-def get_clipboard_command(environ: Mapping[str, str] | None = None) -> list[str] | None:
+def get_clipboard_command(environ: Mapping[str, str | None] | None = None) -> list[str] | None:
     env = environ or os.environ
 
     if env.get("WAYLAND_DISPLAY") and shutil.which("wl-copy"):
@@ -47,7 +47,7 @@ def get_clipboard_command(environ: Mapping[str, str] | None = None) -> list[str]
     return None
 
 
-def build_osc52_sequence(text: str, environ: Mapping[str, str] | None = None) -> str:
+def build_osc52_sequence(text: str, environ: Mapping[str, str | None] | None = None) -> str:
     payload = base64.b64encode(text.encode("utf-8")).decode("ascii")
     env = environ or os.environ
     sequence = f"\033]52;c;{payload}\a"
@@ -57,7 +57,7 @@ def build_osc52_sequence(text: str, environ: Mapping[str, str] | None = None) ->
     return sequence
 
 
-def copy_text_with_osc52(text: str, stream: Any = None, environ: Mapping[str, str] | None = None) -> bool:
+def copy_text_with_osc52(text: str, stream: Any = None, environ: Mapping[str, str | None] | None = None) -> bool:
     output = stream or sys.stdout
     if not hasattr(output, "write") or not hasattr(output, "flush"):
         return False
@@ -233,6 +233,63 @@ class ErrorDialog(ModalScreen[None]):
             self.app.exit()
         else:
             self.dismiss()
+
+
+class ConfirmDialog(ModalScreen[bool]):
+    """Modal yes/no question; dismissed with True (confirm) or False (cancel)."""
+
+    CSS = """
+    ConfirmDialog {
+        align: center middle;
+        background: rgba(0, 0, 0, 0.6);
+    }
+    #confirm-dialog {
+        width: 60;
+        height: auto;
+        border: solid $border;
+        background: #0f1115;
+        padding: 1 2;
+    }
+    #confirm-message {
+        padding-bottom: 1;
+        height: auto;
+    }
+    #confirm-buttons {
+        height: 3;
+    }
+    #confirm-buttons Button {
+        width: 50%;
+    }
+    """
+
+    def __init__(self, title: str, message: str):
+        super().__init__()
+        self.confirm_title = title
+        self.confirm_message = message
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="confirm-dialog"):
+            yield Label(self.confirm_title, id="confirm-title")
+            yield Static(self.confirm_message, id="confirm-message")
+            with Horizontal(id="confirm-buttons"):
+                yield Button("Overwrite", variant="warning", id="confirm-yes")
+                yield Button("Cancel", variant="default", id="confirm-no")
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        self.dismiss(event.button.id == "confirm-yes")
+
+
+class PersistInput(Input):
+    """Input that notifies the app when it loses focus so pending edits persist."""
+
+    class BlurredWithEdits(Message):
+        def __init__(self, input_id: str, value: str) -> None:
+            self.input_id = input_id
+            self.value = value
+            super().__init__()
+
+    def on_blur(self) -> None:
+        self.post_message(self.BlurredWithEdits(self.id or "", self.value))
 
 
 class AitranscribeTUI(App[None]):
@@ -443,6 +500,7 @@ class AitranscribeTUI(App[None]):
         self.status_text = "Press Space to Start Recording" if self.input_source == "microphone" else "Press Enter on File to Transcribe"
         self.feedback_state = {step_id: "pending" for step_id, _ in self.FEEDBACK_STEPS}
         self.raw_transcript: str | None = None
+        self._dirty_inputs: set[str] = set()
         self.append_mode: bool = False
         self.append_target_id: int | None = None
         self.append_base_text: str = ""
@@ -527,7 +585,7 @@ class AitranscribeTUI(App[None]):
                         yield RadioButton("Filesystem file", id="source-file", value=self.input_source == "file")
                     with Horizontal(classes="field_row"):
                         yield Label("File")
-                        yield Input(value=str(self.initial_settings.get("file_path", "")), placeholder="/path/to/audio.mp3", id="file_path")
+                        yield PersistInput(value=str(self.initial_settings.get("file_path", "")), placeholder="/path/to/audio.mp3", id="file_path")
                     with RadioSet(id="preprocess_modes"):
                         yield RadioButton("Raw transcription", id="mode-raw", value=self.pre_process_mode == "raw")
                         yield RadioButton("Cleanup Text / Preserve Language", id="mode-cleanup", value=self.pre_process_mode == "cleanup")
@@ -535,10 +593,10 @@ class AitranscribeTUI(App[None]):
                 with Vertical(id="extra_panel", classes="panel"):
                     with Horizontal(classes="field_row"):
                         yield Label("STT-Model")
-                        yield Input(value=self.default_stt_model, placeholder=f"{self.stt_provider_name} model", id="stt_model")
+                        yield PersistInput(value=self.default_stt_model, placeholder=f"{self.stt_provider_name} model", id="stt_model")
                     with Horizontal(classes="field_row"):
                         yield Label("LLM-Model")
-                        yield Input(value=self.default_llm_model, placeholder=f"{self.llm_provider_name} model", id="llm_model")
+                        yield PersistInput(value=self.default_llm_model, placeholder=f"{self.llm_provider_name} model", id="llm_model")
         yield Footer()
 
     def on_mount(self) -> None:
@@ -632,10 +690,19 @@ class AitranscribeTUI(App[None]):
         return f"{prefix}{shortened}"
 
     def refresh_history(self) -> None:
-        count = self.prompt_manager.count_prompts()
-        history_list = self.query_one("#history_list", OptionList)
-        available_width = self._history_preview_width()
-        self.history_prompts = self.prompt_manager.recent_prompts()
+        try:
+            count = self.prompt_manager.count_prompts()
+            history_list = self.query_one("#history_list", OptionList)
+            available_width = self._history_preview_width()
+            self.history_prompts = self.prompt_manager.recent_prompts()
+        except Exception as exc:
+            self.push_screen(ErrorDialog(
+                title="History Unavailable",
+                message="Could not read stored transcriptions.",
+                detail=str(exc),
+                fatal=False,
+            ))
+            return
         self.query_one("#history_summary", Static).update(f"Stored: {count} | Arrows to preview")
 
         if not self.history_prompts:
@@ -932,7 +999,11 @@ class AitranscribeTUI(App[None]):
         else:
             self.clear_history_selection()
         self.latest_transcript = text
-        self.raw_transcript = result.get("raw_text") or self.raw_transcript
+        raw_text = result.get("raw_text")
+        # Fall back only when the key is absent/None; an empty string is a valid result.
+        if raw_text is None:
+            raw_text = self.raw_transcript
+        self.raw_transcript = raw_text
         self.latest_file_path = result.get("file_path")
         self.set_idle_status()
         self.refresh_transcript()
@@ -1053,6 +1124,30 @@ class AitranscribeTUI(App[None]):
             self.refresh_status()
             return
 
+        issue_path = "/tmp/issue.md"
+        self._issue_file_existed = os.path.exists(issue_path)
+        if self._issue_file_existed:
+            self.push_screen(
+                ConfirmDialog(
+                    title="Overwrite File?",
+                    message=f"{issue_path} already exists.\nOverwrite it with the selected transcription?",
+                ),
+                callback=self._write_issue_confirmed,
+            )
+        else:
+            self._write_issue_confirmed(True)
+
+    def _write_issue_confirmed(self, confirmed: bool | None) -> None:
+        if not confirmed:
+            self.set_status_message("Write cancelled.")
+            self.refresh_status()
+            return
+
+        if self.selected_history_id is None or self.selected_history_text is None:
+            self.set_status_message("No transcription selected to write.")
+            self.refresh_status()
+            return
+
         summary = None
         for prompt in self.history_prompts:
             if prompt["id"] == self.selected_history_id:
@@ -1060,16 +1155,12 @@ class AitranscribeTUI(App[None]):
                 break
 
         issue_path = "/tmp/issue.md"
-        file_existed = os.path.exists(issue_path)
         try:
             with open(issue_path, "w", encoding="utf-8") as f:
                 if summary:
                     f.write(f"# {summary}\n\n")
                 f.write(self.selected_history_text)
-            if file_existed:
-                self.set_status_message(f"{issue_path} was overwritten.")
-            else:
-                self.set_status_message(f"{issue_path} was written.")
+            self.set_status_message(f"{issue_path} was overwritten." if self._issue_file_existed else f"{issue_path} was written.")
         except OSError as e:
             self.set_status_message(f"Could not write {issue_path}: {e}")
         self.refresh_status()
@@ -1135,17 +1226,29 @@ class AitranscribeTUI(App[None]):
             self.action_enter_command_mode()
 
     def on_input_changed(self, event: Input.Changed) -> None:
-        if event.input.id == "file_path":
-            self.persist_setting_value("file_path", event.value)
-        elif event.input.id == "stt_model":
-            value = event.value.strip()
-            if value:
-                self.persist_setting_value("stt_model", value)
-        elif event.input.id == "llm_model":
-            value = event.value.strip()
-            if value:
-                self.persist_setting_value("llm_model", value)
+        # Persisting happens on submit/blur (issue #72 #12), not per keystroke.
+        if event.input.id in {"file_path", "stt_model", "llm_model"}:
+            self._dirty_inputs.add(event.input.id)
+
+    def on_persist_input_blurred_with_edits(self, event: PersistInput.BlurredWithEdits) -> None:
+        if event.input_id in self._dirty_inputs:
+            self._persist_input_value(event.input_id, event.value)
+
+    def _persist_input_value(self, input_id: str, value: str) -> None:
+        self._dirty_inputs.discard(input_id)
+        if input_id == "file_path":
+            self.persist_setting_value("file_path", value)
+        elif input_id == "stt_model":
+            stripped = value.strip()
+            if stripped:
+                self.persist_setting_value("stt_model", stripped)
+        elif input_id == "llm_model":
+            stripped = value.strip()
+            if stripped:
+                self.persist_setting_value("llm_model", stripped)
 
     def on_input_submitted(self, event: Input.Submitted) -> None:
+        if event.input.id in {"file_path", "stt_model", "llm_model"}:
+            self._persist_input_value(event.input.id, event.value)
         if event.input.id == "file_path":
             self.start_file_transcription()

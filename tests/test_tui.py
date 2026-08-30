@@ -456,6 +456,141 @@ async def test_write_issue_feedback_uses_flash_status_field():
 
 
 @pytest.mark.anyio
+async def test_write_issue_shows_confirm_dialog_when_file_exists():
+    prompt_manager = Mock()
+    prompt_manager.count_prompts.return_value = 1
+    prompt_manager.recent_prompts.return_value = [
+        {"id": 7, "prompt": "Stored transcript", "filename": "a.mp3", "timestamp": "2026-03-09T11:00:00", "summary": "Issue title"},
+    ]
+
+    app = AitranscribeTUI(
+        prompt_manager=prompt_manager,
+        process_audio=Mock(),
+        process_file=Mock(),
+        stt_provider_name="Groq",
+        llm_provider_name="openrouter",
+        default_stt_model="whisper",
+        default_llm_model="gpt",
+        initial_settings={"pre_process_mode": "english", "input_source": "microphone"},
+    )
+    app.selected_history_id = 7
+    app.selected_history_text = "Stored transcript"
+    app.history_prompts = prompt_manager.recent_prompts.return_value
+
+    with patch("tui.os.path.exists", return_value=True):
+        with patch("builtins.open", create=True) as mock_open:
+            async with app.run_test() as pilot:
+                app.action_write_issue()
+                await pilot.pause()
+                # Cancel via the confirm dialog
+                from tui import ConfirmDialog
+                assert isinstance(app.screen, ConfirmDialog)
+                await pilot.click("#confirm-no")
+                await pilot.pause()
+                flash_text = str(app.query_one("#flash_status", Static).render())
+
+    assert not mock_open.called
+    assert flash_text == "Write cancelled."
+
+
+@pytest.mark.anyio
+async def test_write_issue_overwrites_after_confirmation():
+    prompt_manager = Mock()
+    prompt_manager.count_prompts.return_value = 1
+    prompt_manager.recent_prompts.return_value = [
+        {"id": 7, "prompt": "Stored transcript", "filename": "a.mp3", "timestamp": "2026-03-09T11:00:00", "summary": "Issue title"},
+    ]
+
+    app = AitranscribeTUI(
+        prompt_manager=prompt_manager,
+        process_audio=Mock(),
+        process_file=Mock(),
+        stt_provider_name="Groq",
+        llm_provider_name="openrouter",
+        default_stt_model="whisper",
+        default_llm_model="gpt",
+        initial_settings={"pre_process_mode": "english", "input_source": "microphone"},
+    )
+    app.selected_history_id = 7
+    app.selected_history_text = "Stored transcript"
+    app.history_prompts = prompt_manager.recent_prompts.return_value
+
+    with patch("tui.os.path.exists", return_value=True):
+        with patch("builtins.open", create=True) as mock_open:
+            async with app.run_test() as pilot:
+                app.action_write_issue()
+                await pilot.pause()
+                await pilot.click("#confirm-yes")
+                await pilot.pause()
+                flash_text = str(app.query_one("#flash_status", Static).render())
+
+    assert mock_open.called
+    assert flash_text == "/tmp/issue.md was overwritten."
+
+
+@pytest.mark.anyio
+async def test_processing_finished_empty_raw_text_not_replaced_by_stale():
+    """Issue #72 #13: an empty raw_text result must not fall back to the stale value."""
+    prompt_manager = Mock()
+    prompt_manager.count_prompts.return_value = 0
+    prompt_manager.recent_prompts.return_value = []
+
+    app = AitranscribeTUI(
+        prompt_manager=prompt_manager,
+        process_audio=Mock(),
+        process_file=Mock(),
+        stt_provider_name="Groq",
+        llm_provider_name="openrouter",
+        default_stt_model="whisper",
+        default_llm_model="gpt",
+        initial_settings={"pre_process_mode": "english", "input_source": "microphone"},
+    )
+
+    async with app.run_test():
+        app.raw_transcript = "Stale value"
+        app.processing_finished({"text": "Final", "raw_text": "", "prompt_id": "", "file_path": ""})
+        assert app.raw_transcript == ""
+
+        app.processing_finished({"text": "Final", "prompt_id": "", "file_path": ""})
+        assert app.raw_transcript == ""
+
+
+@pytest.mark.anyio
+async def test_input_persists_on_blur_not_per_keystroke():
+    """Issue #72 #12: model inputs persist on blur, not on every Input.Changed."""
+    prompt_manager = Mock()
+    prompt_manager.count_prompts.return_value = 0
+    prompt_manager.recent_prompts.return_value = []
+
+    persist = Mock()
+    app = AitranscribeTUI(
+        prompt_manager=prompt_manager,
+        process_audio=Mock(),
+        process_file=Mock(),
+        stt_provider_name="Groq",
+        llm_provider_name="openrouter",
+        default_stt_model="whisper",
+        default_llm_model="gpt",
+        initial_settings={"pre_process_mode": "english", "input_source": "microphone"},
+        persist_setting=persist,
+    )
+
+    async with app.run_test() as pilot:
+        stt_input = app.query_one("#stt_model", Input)
+        stt_input.focus()
+        await pilot.pause()
+        stt_input.value = "whisper-large-v3"
+        await pilot.pause()
+        # No persistence while typing
+        persist.assert_not_called()
+        # Blur persists
+        app.set_focus(None)
+        await pilot.pause()
+
+    persist.assert_called_once_with("stt_model", "whisper-large-v3")
+
+
+@pytest.mark.anyio
 async def test_refresh_feedback_preserves_summary_prefix_on_startup():
     prompt_manager = Mock()
     prompt_manager.count_prompts.return_value = 0

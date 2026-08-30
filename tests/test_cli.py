@@ -588,6 +588,66 @@ def test_promptmanager_remove_prompt_by_id():
     finally:
         temp_file.unlink()
 
+def test_promptmanager_errors_propagate_not_swallowed():
+    """Issue #72 #10: DB errors must raise, not return silent defaults."""
+    with tempfile.NamedTemporaryFile(mode='w', suffix='.sqlite', delete=False) as f:
+        temp_file = Path(f.name)
+
+    try:
+        manager = PromptManager(temp_file)
+        with patch.object(manager, "_connect", side_effect=sqlite3.Error("disk I/O error")):
+            with pytest.raises(sqlite3.Error):
+                manager.count_prompts()
+            with pytest.raises(sqlite3.Error):
+                manager.add_prompt("text", "file.mp3")
+            with pytest.raises(sqlite3.Error):
+                manager.recent_prompts()
+            with pytest.raises(sqlite3.Error):
+                manager.update_prompt(1, "new")
+            with pytest.raises(sqlite3.Error):
+                manager.remove_prompt_by_id(1)
+            with pytest.raises(sqlite3.Error):
+                manager.query_prompt()
+    finally:
+        temp_file.unlink()
+
+def test_migrate_config_ignores_commented_keys():
+    """Issue #72 #11: a commented-out key must not count as present."""
+    import main
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        config_file = Path(tmp_dir) / "config"
+        config_file.write_text('# GROQ_API_KEY="commented_out"\n')
+        with patch.object(main, "CONFIG_FILE", config_file):
+            main._migrate_config()
+        text = config_file.read_text()
+    # The commented line is ignored; the real key was appended
+    assert 'GROQ_API_KEY="your_groq_api_key_here"' in text
+    assert 'LLM_PROVIDER="openrouter"' in text
+    assert 'PRE_PROCESS_MODE="english"' in text
+
+def test_migrate_config_noop_when_all_keys_present():
+    """Issue #72 #11: nothing is appended when every key exists (commented or not)."""
+    import main
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        config_file = Path(tmp_dir) / "config"
+        content = "\n".join(f'{key}="x"' for key, _ in main._MIGRATION_BLOCKS)
+        config_file.write_text(content)
+        with patch.object(main, "CONFIG_FILE", config_file):
+            main._migrate_config()
+        assert config_file.read_text() == content
+
+def test_migrate_config_single_write():
+    """Issue #72 #11: all missing blocks are appended in one write."""
+    import main
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        config_file = Path(tmp_dir) / "config"
+        config_file.write_text("")
+        with patch.object(main, "CONFIG_FILE", config_file), \
+             patch("builtins.open", wraps=open) as mock_open:
+            main._migrate_config()
+    appends = [c for c in mock_open.call_args_list if c.kwargs.get("mode") == "a" or (c.args and len(c.args) > 1 and c.args[1] == "a")]
+    assert len(appends) == 1
+
 # ==================== Integration Tests ====================
 
 def test_cli_query_prompt_with_content():
