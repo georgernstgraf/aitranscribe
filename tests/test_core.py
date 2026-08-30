@@ -66,19 +66,42 @@ def test_get_audio_duration_parses_ffprobe_output():
 def test_compress_audio_default_output_path(tmp_path):
     src = tmp_path / "recording.wav"
     src.write_bytes(b"x")
+    expected = tmp_path / "recording_compressed.mp3"
     with patch("core._ffmpeg") as mock_ffmpeg:
+        expected.write_bytes(b"audio")
         out = compress_audio(str(src))
-    assert out == str(tmp_path / "recording_compressed.mp3")
+    assert out == str(expected)
     mock_ffmpeg.assert_called_once_with("-i", str(src), "-b:a", "32k", out)
 
 def test_compress_audio_explicit_output_path(tmp_path):
     src = tmp_path / "recording.wav"
     src.write_bytes(b"x")
-    explicit = str(tmp_path / "custom.mp3")
+    explicit = tmp_path / "custom.mp3"
     with patch("core._ffmpeg") as mock_ffmpeg:
-        out = compress_audio(str(src), output_path=explicit)
-    assert out == explicit
-    mock_ffmpeg.assert_called_once_with("-i", str(src), "-b:a", "32k", explicit)
+        explicit.write_bytes(b"audio")
+        out = compress_audio(str(src), output_path=str(explicit))
+    assert out == str(explicit)
+    mock_ffmpeg.assert_called_once_with("-i", str(src), "-b:a", "32k", str(explicit))
+
+def test_compress_audio_missing_output_raises(tmp_path):
+    src = tmp_path / "recording.wav"
+    src.write_bytes(b"x")
+    missing = tmp_path / "never_created.mp3"
+    with patch("core._ffmpeg"):
+        with pytest.raises(RuntimeError) as exc_info:
+            compress_audio(str(src), output_path=str(missing))
+    assert "produced no output" in exc_info.value.args[0]
+    assert str(missing) in exc_info.value.args[0]
+
+def test_compress_audio_empty_output_raises(tmp_path):
+    src = tmp_path / "recording.wav"
+    src.write_bytes(b"x")
+    empty = tmp_path / "empty.mp3"
+    empty.write_bytes(b"")
+    with patch("core._ffmpeg"):
+        with pytest.raises(RuntimeError) as exc_info:
+            compress_audio(str(src), output_path=str(empty))
+    assert "produced no output" in exc_info.value.args[0]
 
 # --- chunk_audio ---
 
@@ -98,7 +121,8 @@ def test_chunk_audio_large_file_creates_chunks(tmp_path):
         for chunk in created:
             chunk.write_bytes(b"c")
 
-    with patch("core._ffmpeg", side_effect=fake_ffmpeg) as mock_ffmpeg:
+    with patch("core.get_audio_duration", return_value=1200.0), \
+         patch("core._ffmpeg", side_effect=fake_ffmpeg) as mock_ffmpeg:
         chunks = chunk_audio(str(src), max_size_mb=0)
 
     mock_ffmpeg.assert_called_once()
@@ -106,16 +130,51 @@ def test_chunk_audio_large_file_creates_chunks(tmp_path):
     out_pattern = args[-1]
     assert out_pattern == str(tmp_path / "big_chunk%01d.mp3")
     assert "-f" in args and "segment" in args
-    assert args[args.index("-segment_time") + 1] == "600"
+    assert args[args.index("-segment_time") + 1] == "60"
     assert "-c" in args and "copy" in args
     assert chunks == [str(c) for c in created]
 
 def test_chunk_audio_no_chunks_created_falls_back_to_source(tmp_path):
     src = tmp_path / "big.mp3"
     src.write_bytes(b"x")
-    with patch("core._ffmpeg"):
+    with patch("core.get_audio_duration", return_value=1200.0), \
+         patch("core._ffmpeg"):
         chunks = chunk_audio(str(src), max_size_mb=0)
     assert chunks == [str(src)]
+
+def test_chunk_audio_segment_time_derived_from_bitrate(tmp_path):
+    src = tmp_path / "big.mp3"
+    src.write_bytes(b"x")
+    # 50 MB over 1200s -> 25 MB max = 600s * 0.95 margin = 570s
+    with patch("core.os.path.getsize", return_value=50 * 1024 * 1024), \
+         patch("core.get_audio_duration", return_value=1200.0), \
+         patch("core._ffmpeg") as mock_ffmpeg:
+        chunk_audio(str(src), max_size_mb=25)
+    args = mock_ffmpeg.call_args.args
+    assert args[args.index("-segment_time") + 1] == "570"
+
+def test_chunk_audio_segment_time_floored_at_60s(tmp_path):
+    src = tmp_path / "big.mp3"
+    src.write_bytes(b"x")
+    # 100 MB over 60s -> 25 MB max = 15s * 0.95 = 14s -> floored to 60s
+    with patch("core.os.path.getsize", return_value=100 * 1024 * 1024), \
+         patch("core.get_audio_duration", return_value=60.0), \
+         patch("core._ffmpeg") as mock_ffmpeg:
+        chunk_audio(str(src), max_size_mb=25)
+    args = mock_ffmpeg.call_args.args
+    assert args[args.index("-segment_time") + 1] == "60"
+
+def test_chunk_audio_invalid_duration_raises(tmp_path):
+    src = tmp_path / "big.mp3"
+    src.write_bytes(b"x")
+    with patch("core.os.path.getsize", return_value=50 * 1024 * 1024), \
+         patch("core.get_audio_duration", return_value=0.0), \
+         patch("core._ffmpeg") as mock_ffmpeg:
+        with pytest.raises(RuntimeError) as exc_info:
+            chunk_audio(str(src), max_size_mb=25)
+    assert "invalid duration" in exc_info.value.args[0]
+    assert str(src) in exc_info.value.args[0]
+    mock_ffmpeg.assert_not_called()
 
 # --- transcribe_audio ---
 
@@ -149,6 +208,14 @@ def test_transcribe_audio_handles_missing_language(tmp_path):
     verbose.text = "hello"
     client.audio.transcriptions.create.return_value = verbose
     assert transcribe_audio(client, str(src), "m") == ("hello", None)
+
+def test_transcribe_audio_missing_file_raises(tmp_path):
+    client = MagicMock()
+    missing = str(tmp_path / "nonexistent.mp3")
+    with pytest.raises(FileNotFoundError) as exc_info:
+        transcribe_audio(client, missing, "whisper-large-v3-turbo")
+    assert missing in exc_info.value.args[0]
+    client.audio.transcriptions.create.assert_not_called()
 
 # --- process_with_llm (moved from test_cli.py) ---
 

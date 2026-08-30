@@ -2,9 +2,9 @@
 
 No pending tasks. All session work committed and pushed to main:
 
-- polished-recognition prompt port: `[post_process].system` with `{{source_language_clause}}`/`{{target_language_clause}}`, bare `{{text}}` user template, verbose_json STT language detection threaded into post-process messages
-- Config file renamed to `aitranscribe.conf` (no auto-migration; user's file renamed on disk, keys verified)
-- TUI cleanup-mode label now "Cleanup Only" (mode key `cleanup` unchanged)
-- TUI launch: Command Mode + microphone default, no summary-backfill tick (2a01d2d)
+- Audit issue #63 fully remediated: final items #8 (`chunk_audio` size-aware segmentation: segment time = max(60, (max_size_mb / bitrate) * 0.95)) and #9 (`compress_audio` non-empty output verification, `transcribe_audio` FileNotFoundError guard) closed; 138 tests pass
+- Earlier this session: polished-recognition prompt port (`[post_process].system` with language clauses), config rename to `aitranscribe.conf`, TUI "Cleanup Only" label, TUI Command Mode + microphone default launch (2a01d2d)
+
+Uncommitted this session: core.py #8/#9 fixes + test_core.py updates + docs/ai updates (see `git status`).
 
 Last cleared: 2026-08-30.

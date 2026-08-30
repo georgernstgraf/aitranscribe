@@ -43,21 +43,38 @@ def compress_audio(file_path: str, output_path: str | None = None) -> str:
         output_dir = Path(file_path).parent
         output_path = str(output_dir / f"{file_name}_compressed.mp3")
     _ffmpeg("-i", file_path, "-b:a", "32k", output_path)
+    if not os.path.isfile(output_path) or os.path.getsize(output_path) == 0:
+        raise RuntimeError(
+            f"ffmpeg reported success but produced no output: {output_path}"
+        )
     return output_path
 
 
 def chunk_audio(file_path: str, max_size_mb: int = 25) -> list[str]:
-    """Split audio into 10-minute chunks for files larger than max_size_mb."""
+    """Split audio into chunks sized to stay under max_size_mb.
+
+    Segment length is derived from the file's bitrate so each chunk fits
+    the size limit (with a 5% margin for keyframe-aligned cut points).
+    Files already within the limit are returned unsplit.
+    """
     file_size_mb = os.path.getsize(file_path) / (1024 * 1024)
     if file_size_mb <= max_size_mb:
         return [file_path]
+
+    duration = get_audio_duration(file_path)
+    if duration <= 0:
+        raise RuntimeError(
+            f"Cannot chunk audio: invalid duration ({duration}s) for {file_path}"
+        )
+    rate_mb_per_s = file_size_mb / duration
+    segment_time = max(60, int((max_size_mb / rate_mb_per_s) * 0.95))
 
     file_name = Path(file_path).stem
     file_ext = Path(file_path).suffix
     output_dir = Path(file_path).parent
     out_pattern = str(output_dir / f"{file_name}_chunk%01d{file_ext}")
 
-    _ffmpeg("-i", file_path, "-f", "segment", "-segment_time", "600", "-c", "copy", out_pattern)
+    _ffmpeg("-i", file_path, "-f", "segment", "-segment_time", str(segment_time), "-c", "copy", out_pattern)
 
     chunks: list[str] = []
     i = 0
@@ -76,6 +93,8 @@ def chunk_audio(file_path: str, max_size_mb: int = 25) -> list[str]:
 
 def transcribe_audio(client: OpenAI, file_path: str, stt_model: str) -> tuple[str, str | None]:
     """Transcribes a single audio file, returning (text, detected_language)."""
+    if not os.path.isfile(file_path):
+        raise FileNotFoundError(f"Audio file not found: {file_path}")
     with open(file_path, "rb") as audio_file:
         transcript = client.audio.transcriptions.create(
             model=stt_model,
