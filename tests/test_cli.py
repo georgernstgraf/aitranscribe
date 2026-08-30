@@ -194,25 +194,51 @@ def test_remove_prompt_option():
 # ==================== Logic Helper Tests ====================
 
 def test_build_post_process_messages_cleanup_only():
-    """Test post-process messages without translation target."""
+    """Test post-process messages without translation target or detected language."""
     messages = build_post_process_messages("Hello world", target_language=None)
     assert len(messages) == 2
     assert messages[0]["role"] == "system"
     assert messages[1]["role"] == "user"
-    assert "Hello world" in messages[1]["content"]
-    assert "correct grammatical errors" in messages[1]["content"]
-    assert "{{translate}}" not in messages[1]["content"]
-    assert "{{target_language}}" not in messages[1]["content"]
+    assert messages[1]["content"] == "Hello world"
+    assert "Clean up the transcription" in messages[0]["content"]
+    assert "Return only the cleaned-up transcription." in messages[0]["content"]
+    assert "{{target_language_clause}}" not in messages[0]["content"]
+    assert "{{source_language_clause}}" not in messages[0]["content"]
+    assert "The STT service transcribed" not in messages[0]["content"]
+    assert "Please produce the output" not in messages[0]["content"]
 
 
 def test_build_post_process_messages_with_translate():
     """Test post-process messages with translation target."""
     messages = build_post_process_messages("Hallo Welt", target_language="English")
     assert len(messages) == 2
-    assert "Hallo Welt" in messages[1]["content"]
-    assert "correct grammatical errors" in messages[1]["content"]
-    assert "English" in messages[1]["content"]
-    assert "{{translate}}" not in messages[1]["content"]
+    assert messages[1]["content"] == "Hallo Welt"
+    assert "Clean up the transcription" in messages[0]["content"]
+    assert "Please produce the output in English." in messages[0]["content"]
+    assert "{{target_language_clause}}" not in messages[0]["content"]
+
+
+def test_build_post_process_messages_with_source_language():
+    """Detected STT language becomes a capitalized sentence in the system prompt."""
+    messages = build_post_process_messages(
+        "Hallo Welt", target_language=None, source_language="german"
+    )
+    assert "The STT service transcribed audio spoken in German." in messages[0]["content"]
+
+
+def test_build_post_process_messages_unknown_source_language_omitted():
+    """'unknown' or blank detected languages omit the source clause."""
+    for value in ("unknown", "Unknown", "", None):
+        messages = build_post_process_messages("Hi", target_language=None, source_language=value)
+        assert "The STT service transcribed" not in messages[0]["content"]
+
+
+def test_build_post_process_messages_collapses_blank_lines():
+    """Empty clauses leave no more than one blank line in the system prompt."""
+    messages = build_post_process_messages("Hi", target_language=None, source_language=None)
+    assert "\n\n\n" not in messages[0]["content"]
+    assert not messages[0]["content"].startswith("\n")
+    assert not messages[0]["content"].endswith("\n")
 
 
 def test_build_summary_messages():
@@ -264,7 +290,7 @@ def test_get_recording_file_paths_uses_three_digits():
 
 def test_get_tui_settings_defaults_to_english_and_microphone(tmp_path):
     """Test TUI settings load new defaults from config."""
-    config_file = tmp_path / "config"
+    config_file = tmp_path / "aitranscribe.conf"
     config_file.write_text('PRE_PROCESS_MODE="english"\nTRANSCRIBE_SOURCE="microphone"\nVERBOSE_ERRORS="false"\n')
 
     with patch("main.CONFIG_FILE", config_file), patch("main.GROQ_STT_MODEL", "whisper"), patch("main.LLM_MODEL", "gpt"):
@@ -374,7 +400,7 @@ def test_run_transcription_pipeline_raw_mode():
     """Pipeline returns raw text unchanged when LLM is not needed."""
     with patch("main.require_stt_client", return_value=MagicMock()), \
          patch("main.chunk_audio", return_value=["c0.mp3", "c1.mp3"]), \
-         patch("main.transcribe_audio", side_effect=["hello ", " world"]):
+         patch("main.transcribe_audio", side_effect=[("hello ", "english"), (" world", None)]):
         final_text, raw_text = run_transcription_pipeline(
             "fake.mp3", stt_model="m", llm_model="m", needs_llm=False,
             target_language=None, do_chunk=True,
@@ -384,7 +410,7 @@ def test_run_transcription_pipeline_raw_mode():
 
 def test_run_transcription_pipeline_llm_post_process():
     with patch("main.require_stt_client", return_value=MagicMock()), \
-         patch("main.transcribe_audio", return_value="raw"), \
+         patch("main.transcribe_audio", return_value=("raw", "german")), \
          patch("main.require_llm_client", return_value=MagicMock()), \
          patch("main.process_with_llm", return_value="polished") as mock_llm:
         final_text, raw_text = run_transcription_pipeline(
@@ -394,12 +420,15 @@ def test_run_transcription_pipeline_llm_post_process():
     assert final_text == "polished"
     assert raw_text == "raw"
     mock_llm.assert_called_once()
+    messages = mock_llm.call_args[0][1]
+    assert "spoken in German." in messages[0]["content"]
+    assert "Please produce the output in English." in messages[0]["content"]
 
 def test_run_transcription_pipeline_feedback_and_transcript_callbacks():
     feedback_events: list[tuple[str, str]] = []
     transcript_events: list[str] = []
     with patch("main.require_stt_client", return_value=MagicMock()), \
-         patch("main.transcribe_audio", return_value="text"):
+         patch("main.transcribe_audio", return_value=("text", None)):
         run_transcription_pipeline(
             "fake.mp3", stt_model="m", llm_model="m", needs_llm=False,
             target_language=None, do_chunk=False,
@@ -419,7 +448,7 @@ def test_run_transcription_pipeline_cleans_up_chunks():
         original.write_bytes(b"x")
         with patch("main.chunk_audio", return_value=[str(chunk0), str(original)]), \
              patch("main.require_stt_client", return_value=MagicMock()), \
-             patch("main.transcribe_audio", return_value="t"):
+             patch("main.transcribe_audio", return_value=("t", None)):
             run_transcription_pipeline(
                 str(original), stt_model="m", llm_model="m", needs_llm=False,
                 target_language=None, do_chunk=True,
@@ -673,7 +702,7 @@ def test_migrate_config_ignores_commented_keys():
     """Issue #72 #11: a commented-out key must not count as present."""
     import main
     with tempfile.TemporaryDirectory() as tmp_dir:
-        config_file = Path(tmp_dir) / "config"
+        config_file = Path(tmp_dir) / "aitranscribe.conf"
         config_file.write_text('# GROQ_API_KEY="commented_out"\n')
         with patch.object(main, "CONFIG_FILE", config_file):
             main._migrate_config()
@@ -687,7 +716,7 @@ def test_migrate_config_noop_when_all_keys_present():
     """Issue #72 #11: nothing is appended when every key exists (commented or not)."""
     import main
     with tempfile.TemporaryDirectory() as tmp_dir:
-        config_file = Path(tmp_dir) / "config"
+        config_file = Path(tmp_dir) / "aitranscribe.conf"
         content = "\n".join(f'{key}="x"' for key, _ in main._MIGRATION_BLOCKS)
         config_file.write_text(content)
         with patch.object(main, "CONFIG_FILE", config_file):
@@ -698,7 +727,7 @@ def test_migrate_config_single_write():
     """Issue #72 #11: all missing blocks are appended in one write."""
     import main
     with tempfile.TemporaryDirectory() as tmp_dir:
-        config_file = Path(tmp_dir) / "config"
+        config_file = Path(tmp_dir) / "aitranscribe.conf"
         config_file.write_text("")
         with patch.object(main, "CONFIG_FILE", config_file), \
              patch("builtins.open", wraps=open) as mock_open:

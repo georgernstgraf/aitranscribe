@@ -16,7 +16,7 @@ source venv/bin/activate
 pip install -r requirements.txt
 ```
 
-Create `~/.config/aitranscribe/config` with your API keys:
+Create `~/.config/aitranscribe/aitranscribe.conf` with your API keys:
 
 ```ini
 GROQ_API_KEY="your_groq_api_key"
@@ -111,7 +111,7 @@ aitranscribe --remove 3                                  # remove transcription 
 
 ## Configuration
 
-Configuration is stored in `~/.config/aitranscribe/config` (Linux/macOS) or `%APPDATA%\aitranscribe\config` (Windows). A template is created automatically on first run.
+Configuration is stored in `~/.config/aitranscribe/aitranscribe.conf` (Linux/macOS) or `%APPDATA%\aitranscribe\aitranscribe.conf` (Windows). A template is created automatically on first run.
 
 ### STT provider
 

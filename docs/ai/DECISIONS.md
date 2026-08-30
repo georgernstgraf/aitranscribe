@@ -141,6 +141,18 @@ Each entry documents WHAT was decided and WHY.
 - **Considered**: Appending the user's request to the system prompt (old pattern), or sending 3 messages (system, task, data).
 - **Tradeoff**: Three different message builders are needed (post_process, summary, translate), but each is simple and the assembly logic is clear.
 
+## 2026-08-30: Port polished-recognition Cleanup Prompt Verbatim With Language Clauses
+- **Choice**: Move all cleanup rules into a dedicated `[post_process].system` prompt (ported verbatim from the polished-recognition Android app), reduce the post-process user template to bare `{{text}}`, and resolve `{{source_language_clause}}` / `{{target_language_clause}}` placeholders in the system prompt. STT switched to `verbose_json` so the detected language feeds the source clause.
+- **Reason**: Aligns AITranscribe's dictation quality with polished-recognition's proven prompt (filler-word removal, hallucination handling, markdown structure) and gives the LLM the STT-detected source language for better cleanup. Cleanup-only mode resolves the target clause to an empty string.
+- **Considered**: One shared reworded system prompt, or per-feature system prompts for post_process/summary/translate.
+- **Tradeoff**: `[system]` (generic) and `[post_process].system` (cleanup-specific) now exist side by side; summary and standalone translate keep using `[system]`. Existing prompts.toml files must be regenerated manually.
+
+## 2026-08-30: Rename Config File To aitranscribe.conf
+- **Choice**: Rename `~/.config/aitranscribe/config` to `~/.config/aitranscribe/aitranscribe.conf` (Windows: `%APPDATA%\aitranscribe\aitranscribe.conf`). No automatic migration — existing users must rename manually.
+- **Reason**: An extensionless file named `config` is opaque to users and tools (editors, file managers, dotfile scanners); the `.conf` suffix makes format and purpose explicit and disambiguates from `prompts.toml`.
+- **Considered**: Auto-rename on startup when the new file is missing but the old one exists.
+- **Tradeoff**: Upgraders lose their config silently (fresh default template created with placeholder keys) unless they rename manually — this is a known, accepted cost of skipping auto-migration.
+
 ## 2026-08-30: Replace Production Asserts With Typed RuntimeError Helpers
 - **Choice**: All `assert stt_client/llm_client is not None` sites in `main.py` replaced by `require_stt_client()` / `require_llm_client()` helpers that raise `RuntimeError` with user-facing messages; message text lives in `stt_missing_message()` / `llm_missing_message()` and is shared with `validate_api_keys()`.
 - **Reason**: Missing API keys previously raised a raw `AssertionError` with no context. RuntimeErrors surface through the existing `except Exception` handlers in both TUI workers and legacy CLI paths.

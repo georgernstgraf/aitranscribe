@@ -1,7 +1,7 @@
 # aitranscribe configuration file
 # Place this file at one of the following locations:
-#   Linux/macOS: ~/.config/aitranscribe/config
-#   Windows:     %APPDATA%\aitranscribe\config
+#   Linux/macOS: ~/.config/aitranscribe/aitranscribe.conf
+#   Windows:     %APPDATA%\aitranscribe\aitranscribe.conf
 #
 # Or copy this file and edit the values directly.
 

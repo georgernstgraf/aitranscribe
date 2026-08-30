@@ -124,18 +124,31 @@ def test_transcribe_audio_calls_client_and_strips(tmp_path):
     src.write_bytes(b"audio-bytes")
     client = MagicMock()
     captured = {}
+    verbose = MagicMock()
+    verbose.text = "  hello world  "
+    verbose.language = "german"
 
     def capture(**kwargs):
         captured.update(kwargs)
         captured["file_bytes"] = kwargs["file"].read()
-        return "  hello world  "
+        return verbose
 
     client.audio.transcriptions.create.side_effect = capture
-    assert transcribe_audio(client, str(src), "whisper-large-v3-turbo") == "hello world"
+    assert transcribe_audio(client, str(src), "whisper-large-v3-turbo") == ("hello world", "german")
     assert captured["model"] == "whisper-large-v3-turbo"
-    assert captured["response_format"] == "text"
+    assert captured["response_format"] == "verbose_json"
     assert captured["file_bytes"] == b"audio-bytes"
     assert captured["file"].closed
+
+
+def test_transcribe_audio_handles_missing_language(tmp_path):
+    src = tmp_path / "audio.mp3"
+    src.write_bytes(b"audio-bytes")
+    client = MagicMock()
+    verbose = MagicMock(spec=["text"])
+    verbose.text = "hello"
+    client.audio.transcriptions.create.return_value = verbose
+    assert transcribe_audio(client, str(src), "m") == ("hello", None)
 
 # --- process_with_llm (moved from test_cli.py) ---
 

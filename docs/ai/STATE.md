@@ -3,24 +3,21 @@
 Current status as of 2026-08-30.
 
 ## Current Focus
-Code audit remediation (#63) complete: #62/#67–#72 all done and closed; #63 ready to close.
+polished-recognition prompt port complete (uncommitted at session end): new `[post_process].system` prompt with `{{source_language_clause}}`/`{{target_language_clause}}`, bare `{{text}}` user template, STT now returns `(text, language)` via `verbose_json` and threads detected language into post-process messages. 130 tests pass. User's `~/.config/aitranscribe/prompts.toml` deleted and regenerated from new defaults.
 
 ## Completed (this cycle)
-- [x] #71 done: shared `run_transcription_pipeline()` used by all 4 paths; tui worker closures extracted; record_from_microphone split into 5 focused helpers; PromptManager output decoupled (list_prompts returns data); RecordingController dataclass; 126 tests pass
-- [x] #72 done: PromptManager exceptions propagate (ErrorDialog/console safety nets); migration ignores commented keys + single-write; TUI inputs persist on blur/submit via PersistInput; empty raw_text respected; /tmp/issue.md confirm dialog (e9a1fb6)
-- [x] #67 done: terminal title set on TUI launch (OSC 2), restored in finally (f241c53)
-- [x] #70 done: main.py import side-effect-free — idempotent init_app(); lazy CLI option defaults (86608eb)
-- [x] #69 done: tests/test_core.py full core.py coverage (0892e80)
-- [x] #68 fixed: 8 production asserts → require_stt_client()/require_llm_client() RuntimeError helpers (e153be4)
-- [x] #62 fixed: summary completion no longer overwrites editor edits
-- [x] #63 split into sub-issues #68–#72, all linked via Sub-Issues API; pydub → ffmpeg refactor (aa50dd9, issue #66 — closed 2026-08-30)
+- [x] Config file renamed to `aitranscribe.conf` (main.py CONFIG_FILE, test fixtures, README, config.example); user's file renamed on disk, keys verified intact; no auto-migration (manual rename required for other users)
+- [x] TUI cleanup-mode label changed to "Cleanup Only" (mode key `cleanup` unchanged)
+- [x] Prompt port from ../polished-recognition (prompts.json → _DEFAULT_PROMPTS_TOML; build_post_process_messages gains source_language param; _validate_prompts requires post_process.system.prompt)
+- [x] core.transcribe_audio switched to verbose_json, returns tuple (text, language); run_transcription_pipeline passes first known chunk language to build_post_process_messages
+- [x] Tests updated: prompt-builder clause cases, pipeline language threading, verbose_json response_format; 130 pass
+- [x] Prior cycle: #63 audit remediation (#62/#67–#72) complete and user-verified
 
 ## Pending
-- [x] User verified: legacy mic recording, live TUI recording (#71 restructure), and terminal title (#67) all work
 - None open
 
 ## Blockers
 - None
 
 ## Next Session Suggestion
-Clean slate. Remaining audit items (#8 chunk docstring mismatch, #9 compress/transcribe error handling) were deemed optional; open fresh issues if wanted.
+Commit the prompt-port changes if not yet committed. Remaining audit items (#8 chunk docstring mismatch, #9 compress/transcribe error handling) remain optional.

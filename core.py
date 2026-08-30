@@ -74,15 +74,16 @@ def chunk_audio(file_path: str, max_size_mb: int = 25) -> list[str]:
 
     return chunks
 
-def transcribe_audio(client: OpenAI, file_path: str, stt_model: str) -> str:
-    """Transcribes a single audio file using the provided client and model."""
+def transcribe_audio(client: OpenAI, file_path: str, stt_model: str) -> tuple[str, str | None]:
+    """Transcribes a single audio file, returning (text, detected_language)."""
     with open(file_path, "rb") as audio_file:
         transcript = client.audio.transcriptions.create(
             model=stt_model,
             file=audio_file,
-            response_format="text"
+            response_format="verbose_json"
         )
-    return str(transcript).strip()
+    language = getattr(transcript, "language", None)
+    return str(transcript.text).strip(), language
 
 def process_with_llm(client: OpenAI, messages: list[dict], llm_model: str) -> str:
     """Sends pre-built messages to an LLM and returns the response content."""
