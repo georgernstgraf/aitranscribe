@@ -277,42 +277,6 @@ def test_require_llm_client_raises_when_missing():
         assert exc_info.value.args[0] == llm_missing_message()
         assert "API key" in exc_info.value.args[0]
 
-# --- core.process_with_llm guard tests ---
-
-from core import process_with_llm
-
-def _mock_llm_response(choices, content=None):
-    response = MagicMock()
-    response.choices = choices
-    if choices:
-        response.choices[0].message.content = content
-    return response
-
-def test_process_with_llm_strips_content():
-    """Test that process_with_llm strips whitespace from returned content."""
-    client = MagicMock()
-    client.chat.completions.create.return_value = _mock_llm_response(
-        [MagicMock()], content="  hello world  "
-    )
-    assert process_with_llm(client, [{"role": "user", "content": "hi"}], "m") == "hello world"
-
-def test_process_with_llm_none_content_returns_empty():
-    """Test that process_with_llm returns empty string when content is None."""
-    client = MagicMock()
-    client.chat.completions.create.return_value = _mock_llm_response(
-        [MagicMock()], content=None
-    )
-    assert process_with_llm(client, [], "m") == ""
-
-def test_process_with_llm_zero_choices_raises():
-    """Test that process_with_llm raises RuntimeError when the API returns zero choices."""
-    client = MagicMock()
-    client.chat.completions.create.return_value = _mock_llm_response([])
-    with pytest.raises(RuntimeError) as exc_info:
-        process_with_llm(client, [], "test-model")
-    assert "no choices" in exc_info.value.args[0]
-    assert "test-model" in exc_info.value.args[0]
-
 def test_wrap_text_short():
     """Test that wrap_text doesn't wrap short text."""
     result = wrap_text("Short text", 80)

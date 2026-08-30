@@ -51,3 +51,5 @@ Follow these without question. Do not deviate unless explicitly told.
 ## Testing
 - Cover TUI integration points from the CLI layer with focused unit tests instead of trying to run an interactive terminal session in `pytest`.
 - Add focused unit tests for clipboard fallback helpers and TUI state-selection behavior instead of trying to verify them through live terminal automation.
+- `core.py` tests live in `tests/test_core.py` (all core functions in one file); mock `core.subprocess.run` or `core._ffmpeg` and use pytest `tmp_path` for real files — never mock `os.path` for `chunk_audio` discovery logic.
+- When a tested function closes a file handle before you can assert on it (e.g. `transcribe_audio`), capture content via a `side_effect` function instead of asserting on the call-args file object later.
