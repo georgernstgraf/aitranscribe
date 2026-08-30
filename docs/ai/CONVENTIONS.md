@@ -11,6 +11,11 @@ Follow these without question. Do not deviate unless explicitly told.
 ## File Layout
 - Keep the `Textual` UI in `tui.py` and keep API, recording, and persistence helpers in `main.py` until a larger refactor is requested.
 
+## Initialization
+- `main.py` import must stay side-effect-free. All setup (config create/migrate, `load_dotenv`, env constants, `PROMPTS`, OpenAI clients, `prompt_manager`) lives in the idempotent `init_app()`; `main()` calls it before any logic. Never add new module-level side effects.
+- CLI option defaults that depend on initialized state (e.g. `stt_model`, `llm_model`) must default to `None` and be resolved inside `main()` after `init_app()`, because typer evaluates signature defaults at import time.
+- Tests that call `init_app()` directly must restore all init-populated globals (see `_INIT_GLOBALS` in `tests/test_cli.py`) so later tests see consistent module state.
+
 ## API Patterns
 - Never use `assert` for runtime validation in production code (`python -O` strips asserts and missing-API-key errors lose all context). Use `require_stt_client()` / `require_llm_client()` from `main.py` instead of touching the module-level `stt_client` / `llm_client` singletons directly; they raise `RuntimeError` with user-facing messages shared with `validate_api_keys()`.
 - For TUI-triggered transcription work, send progress through the four high-level feedback IDs `compress`, `transcribe`, `post_process`, and `summary`, and use a separate transcript callback to surface raw STT text before post-processing finishes.

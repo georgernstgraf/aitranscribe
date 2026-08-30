@@ -52,6 +52,13 @@ except ImportError as e:
 
 runner = CliRunner()
 
+@pytest.fixture(autouse=True)
+def _init_app():
+    """Initialize app state that used to run at import time (see issue #70)."""
+    import main
+    main.init_app()
+    yield
+
 def test_config_dir_path_selection():
     """Test that CONFIG_DIR selection logic works correctly based on OS."""
     from pathlib import PurePath, PureWindowsPath, PurePosixPath
@@ -95,10 +102,52 @@ def test_stt_model_option():
     option = stt_model_option()
     assert isinstance(option, typer.models.OptionInfo)
 
+def test_stt_model_option_default_is_lazy():
+    """stt_model_option must default to None; resolved after init_app() in main()."""
+    option = stt_model_option()
+    assert option.default is None
+
 def test_llm_model_option():
     """Test that llm_model_option returns correct typer.Option."""
     option = llm_model_option()
     assert isinstance(option, typer.models.OptionInfo)
+
+_INIT_GLOBALS = (
+    "PROMPTS", "stt_client", "llm_client", "prompt_manager", "_initialized",
+    "GROQ_API_KEY", "GROQ_STT_MODEL", "LLM_PROVIDER", "LLM_MODEL",
+    "PROMPTS_FILE", "DEFAULT_PRE_PROCESS_MODE", "DEFAULT_VERBOSE_ERRORS",
+)
+
+def test_init_app_is_idempotent(monkeypatch):
+    """init_app() must run setup exactly once even when called repeatedly."""
+    import main
+    monkeypatch.setattr(main, "_initialized", False)
+    for name in _INIT_GLOBALS:
+        monkeypatch.setattr(main, name, getattr(main, name), raising=True)
+    with patch.object(main, "_create_default_config") as mock_create, \
+         patch.object(main, "_migrate_config") as mock_migrate, \
+         patch("main.load_dotenv"), \
+         patch("main._load_prompts", return_value={}), \
+         patch("main.PromptManager"):
+        main.init_app()
+        main.init_app()
+    assert mock_create.call_count + mock_migrate.call_count == 1
+
+def test_import_does_not_initialize_state():
+    """A fresh import of main must leave init-state unset until init_app() runs."""
+    import importlib
+    import main
+    saved = {name: getattr(main, name) for name in _INIT_GLOBALS}
+    try:
+        importlib.reload(main)
+        assert main._initialized is False
+        assert main.PROMPTS is None
+        assert main.stt_client is None
+        assert main.llm_client is None
+        assert main.prompt_manager is None
+    finally:
+        for name, value in saved.items():
+            setattr(main, name, value)
 
 def test_verbose_option():
     """Test that verbose_option returns correct typer.Option."""

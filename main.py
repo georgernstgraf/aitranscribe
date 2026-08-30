@@ -137,18 +137,11 @@ def _migrate_config() -> None:
         with open(CONFIG_FILE, "a") as f:
             f.write('VERBOSE_ERRORS="false"\n')
 
-if not CONFIG_FILE.exists():
-    _create_default_config()
-else:
-    _migrate_config()
-
-load_dotenv(dotenv_path=CONFIG_FILE)
-
-PROMPTS_FILE = Path(os.getenv("PROMPTS_FILE", str(PROMPTS_FILE)))
-
-GROQ_API_KEY = os.getenv("GROQ_API_KEY")
-GROQ_STT_MODEL = os.getenv("GROQ_STT_MODEL", "whisper-large-v3-turbo")
-LLM_PROVIDER = os.getenv("LLM_PROVIDER", "openrouter").lower()
+# Populated by init_app(); import must stay side-effect-free.
+_initialized = False
+GROQ_API_KEY: str | None = None
+GROQ_STT_MODEL: str | None = None
+LLM_PROVIDER: str = "openrouter"
 
 # ------------------------------------------------------------------#
 # Prompt Templates
@@ -240,7 +233,7 @@ def _validate_prompts(data: dict) -> None:
             sys.exit(1)
 
 
-PROMPTS = _load_prompts()
+PROMPTS: dict | None = None
 
 
 _PRE_PROCESS_MODES = {"raw", "cleanup", "english"}
@@ -291,8 +284,8 @@ def _normalize_pre_process_mode(value: str | None) -> str:
     return normalized if normalized in _PRE_PROCESS_MODES else "english"
 
 
-DEFAULT_PRE_PROCESS_MODE = _normalize_pre_process_mode(os.getenv("PRE_PROCESS_MODE", "english"))
-DEFAULT_VERBOSE_ERRORS = _env_flag("VERBOSE_ERRORS", False)
+DEFAULT_PRE_PROCESS_MODE: str = "english"
+DEFAULT_VERBOSE_ERRORS: bool = False
 
 
 def _normalize_transcribe_source(value: str | None) -> str:
@@ -421,27 +414,19 @@ def get_tui_settings() -> dict[str, Any]:
         "verbose": str(config.get("VERBOSE_ERRORS", str(DEFAULT_VERBOSE_ERRORS))).strip().lower() in {"1", "true", "yes", "on"},
     }
 
-stt_client = (
-    OpenAI(
-        base_url="https://api.groq.com/openai/v1",
-        api_key=GROQ_API_KEY,
-    )
-    if GROQ_API_KEY and GROQ_API_KEY != "your_groq_api_key_here"
-    else None
-)
-
-llm_client = _get_llm_client()
-LLM_MODEL = _get_llm_model()
+stt_client: OpenAI | None = None
+llm_client: OpenAI | None = None
+LLM_MODEL: str | None = None
 
 # Option Factory Functions
 def post_process_option():
     return typer.Option(False, "--post-process", "-p", help="Refine text: correct grammar, remove fillers, and structure clearly")
 
 def stt_model_option():
-    return typer.Option(GROQ_STT_MODEL, help="Groq STT model to use")
+    return typer.Option(None, help="Groq STT model to use")
 
 def llm_model_option():
-    return typer.Option(LLM_MODEL, "--llm-model", "-m", help="LLM model to use for post-processing")
+    return typer.Option(None, "--llm-model", "-m", help="LLM model to use for post-processing")
 
 def verbose_option():
     return typer.Option(False, "--verbose", "-v", help="Show verbose error outputs")
@@ -834,7 +819,48 @@ def translate_text(text: str, target_language: str, llm_model: str) -> str | Non
     return translated or None
 
 # Initialize PromptManager
-prompt_manager = PromptManager(PROMPTS_FILE)
+prompt_manager: PromptManager | None = None
+
+
+def init_app() -> None:
+    """Run all setup that used to happen at import time. Idempotent."""
+    global _initialized, PROMPTS_FILE, GROQ_API_KEY, GROQ_STT_MODEL, LLM_PROVIDER
+    global PROMPTS, stt_client, llm_client, LLM_MODEL, prompt_manager
+    global DEFAULT_PRE_PROCESS_MODE, DEFAULT_VERBOSE_ERRORS
+    if _initialized:
+        return
+
+    if not CONFIG_FILE.exists():
+        _create_default_config()
+    else:
+        _migrate_config()
+
+    load_dotenv(dotenv_path=CONFIG_FILE)
+
+    PROMPTS_FILE = Path(os.getenv("PROMPTS_FILE", str(PROMPTS_FILE)))
+    GROQ_API_KEY = os.getenv("GROQ_API_KEY")
+    GROQ_STT_MODEL = os.getenv("GROQ_STT_MODEL", "whisper-large-v3-turbo")
+    LLM_PROVIDER = os.getenv("LLM_PROVIDER", "openrouter").lower()
+
+    DEFAULT_PRE_PROCESS_MODE = _normalize_pre_process_mode(os.getenv("PRE_PROCESS_MODE", "english"))
+    DEFAULT_VERBOSE_ERRORS = _env_flag("VERBOSE_ERRORS", False)
+
+    PROMPTS = _load_prompts()
+
+    stt_client = (
+        OpenAI(
+            base_url="https://api.groq.com/openai/v1",
+            api_key=GROQ_API_KEY,
+        )
+        if GROQ_API_KEY and GROQ_API_KEY != "your_groq_api_key_here"
+        else None
+    )
+
+    llm_client = _get_llm_client()
+    LLM_MODEL = _get_llm_model()
+
+    prompt_manager = PromptManager(PROMPTS_FILE)
+    _initialized = True
 
 
 def process_recorded_audio_for_tui(
@@ -1015,9 +1041,9 @@ def main(
     query_prompt: bool = query_prompt_option(),
     remove_prompt: int | None = remove_prompt_option(),
     english: bool = english_option(),
-    llm_model: str = llm_model_option(),
+    llm_model: str | None = llm_model_option(),
     post_process: bool = post_process_option(),
-    stt_model: str = stt_model_option(),
+    stt_model: str | None = stt_model_option(),
     verbose: bool = verbose_option(),
     help: bool = help_option(),
 ):
@@ -1031,6 +1057,13 @@ def main(
 
     if ctx.resilient_parsing:
         return
+
+    init_app()
+
+    if stt_model is None:
+        stt_model = GROQ_STT_MODEL
+    if llm_model is None:
+        llm_model = LLM_MODEL
 
     state["verbose"] = verbose
 
