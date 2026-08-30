@@ -44,6 +44,8 @@ try:
         require_llm_client,
         stt_missing_message,
         llm_missing_message,
+        set_terminal_title,
+        restore_terminal_title,
         PROMPTS,
         PromptManager,
     )
@@ -325,6 +327,44 @@ def test_require_llm_client_raises_when_missing():
             require_llm_client()
         assert exc_info.value.args[0] == llm_missing_message()
         assert "API key" in exc_info.value.args[0]
+
+# --- terminal title (issue #67) ---
+
+def test_set_terminal_title_writes_osc2_and_returns_previous():
+    """set_terminal_title emits OSC 2 escape and returns the previously read title."""
+    with patch('main.sys.stdout') as mock_stdout, \
+         patch('main._read_terminal_title', return_value='old title'):
+        mock_stdout.isatty.return_value = True
+        previous = set_terminal_title("aitranscribe")
+    assert previous == "old title"
+    mock_stdout.write.assert_called_once_with("\x1b]2;aitranscribe\x07")
+
+def test_restore_terminal_title_writes_previous():
+    with patch('main.sys.stdout') as mock_stdout:
+        mock_stdout.isatty.return_value = True
+        restore_terminal_title("old title")
+    mock_stdout.write.assert_called_once_with("\x1b]2;old title\x07")
+
+def test_restore_terminal_title_noop_without_previous():
+    with patch('main.sys.stdout') as mock_stdout:
+        mock_stdout.isatty.return_value = True
+        restore_terminal_title(None)
+    mock_stdout.write.assert_not_called()
+
+def test_set_terminal_title_noop_when_not_a_tty():
+    with patch('main.sys.stdout') as mock_stdout:
+        mock_stdout.isatty.return_value = False
+        set_terminal_title("aitranscribe")
+    mock_stdout.write.assert_not_called()
+
+def test_set_terminal_title_succeeds_when_title_query_fails():
+    """If reading the previous title fails, the title is still set."""
+    with patch('main.sys.stdout') as mock_stdout, \
+         patch('main._read_terminal_title', side_effect=OSError("no termios")):
+        mock_stdout.isatty.return_value = True
+        previous = set_terminal_title("aitranscribe")
+    assert previous is None
+    mock_stdout.write.assert_called_once_with("\x1b]2;aitranscribe\x07")
 
 def test_wrap_text_short():
     """Test that wrap_text doesn't wrap short text."""

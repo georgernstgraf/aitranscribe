@@ -1004,6 +1004,62 @@ def process_file_for_tui(
         raise
 
 
+def _read_terminal_title() -> str | None:
+    """Query the current OSC 2 window title. Returns None if unsupported."""
+    if not sys.stdout.isatty() or not sys.stdin.isatty():
+        return None
+    import termios
+    import select
+
+    old_attrs = termios.tcgetattr(sys.stdin)
+    try:
+        import tty
+        tty.setraw(sys.stdin.fileno())
+        sys.stdout.write("\x1b]2;?\x07")
+        sys.stdout.flush()
+        response = ""
+        # Terminals answer within milliseconds; 100ms is generous.
+        for _ in range(20):
+            ready, _, _ = select.select([sys.stdin], [], [], 0.005)
+            if not ready:
+                continue
+            response += sys.stdin.read(1)
+            if response.endswith("\x07") or response.endswith("\x1b\\"):
+                break
+    except (termios.error, OSError):
+        return None
+    finally:
+        termios.tcsetattr(sys.stdin, termios.TCSADRAIN, old_attrs)
+
+    if not response.startswith("\x1b]2;"):
+        return None
+    if response.endswith("\x07"):
+        response = response[:-1]
+    elif response.endswith("\x1b\\"):
+        response = response[:-2]
+    return response[4:]
+
+
+def set_terminal_title(title: str) -> str | None:
+    """Set the terminal window title. Returns the previous title if it could be read."""
+    previous: str | None = None
+    try:
+        previous = _read_terminal_title()
+    except Exception:
+        previous = None
+    if sys.stdout.isatty():
+        sys.stdout.write(f"\x1b]2;{title}\x07")
+        sys.stdout.flush()
+    return previous
+
+
+def restore_terminal_title(previous: str | None) -> None:
+    """Restore a previously saved terminal title."""
+    if previous and sys.stdout.isatty():
+        sys.stdout.write(f"\x1b]2;{previous}\x07")
+        sys.stdout.flush()
+
+
 def launch_tui() -> None:
     from tui import AitranscribeTUI
 
@@ -1022,7 +1078,14 @@ def launch_tui() -> None:
         backfill_summaries=lambda: backfill_missing_summaries(prompt_manager, settings["llm_model"]),
         translate_text=translate_text,
     )
-    app.run()
+    previous_title: str | None = None
+    try:
+        if sys.platform.startswith("linux"):
+            previous_title = set_terminal_title("aitranscribe")
+        app.run()
+    finally:
+        if sys.platform.startswith("linux"):
+            restore_terminal_title(previous_title)
 
 # Typer App
 app = typer.Typer(
