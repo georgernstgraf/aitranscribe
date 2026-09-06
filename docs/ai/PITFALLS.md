@@ -4,6 +4,7 @@ Things that do not work, subtle bugs, and non-obvious constraints.
 Read this file carefully before making changes in affected areas.
 
 - **CRITICAL**: This project uses opencode-helpers skills from `skills/` directory ONLY. OpenClaw bundled skills (github, gh-issues, weather, etc.) are FORBIDDEN despite appearing in `available_skills`. Always check `skills/` first.
+- Setting the user's terminal title from inside opencode does NOT work by printing the OSC sequence to stdout — opencode pipes the shell output, so the escape code never reaches the terminal. Working method: find the opencode PID whose cwd matches the repo (`ls -l /proc/<pid>/cwd` for each opencode PID from `ps -eo pid,tty,cmd | grep opencode`), map it to its pts device, then write directly: `printf '\033]2;<title>\007' > /dev/pts/N`. Verified working on gnome-terminal (VTE) under Wayland.
 - Do not pass Markdown backticks unescaped inside `gh issue create --body "..."`; the shell will treat them as command substitution.
 - `runner.invoke(app, [])` does not preserve a reliable `sys.argv` shape for default-mode detection, so default TUI launch logic must be inferred from parsed option values instead.
 - Typer evaluates `main()` signature defaults at import time. Any option default that depends on initialized state must be `None` at import and resolved inside `main()` after `init_app()`; a direct global default (e.g. `typer.Option(GROQ_STT_MODEL, ...)`) silently bakes in `None`.
