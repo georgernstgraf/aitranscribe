@@ -17,7 +17,7 @@ from rich.progress import Progress, TextColumn
 from dotenv import dotenv_values, load_dotenv, set_key
 from openai import OpenAI
 from pynput import keyboard
-from core import chunk_audio, transcribe_audio, process_with_llm, compress_audio
+from core import MAX_AUDIO_SIZE_MB, chunk_audio, transcribe_audio, process_with_llm, compress_audio
 
 console = Console(highlight=False, color_system=None)
 state = {"verbose": False}
@@ -1026,6 +1026,25 @@ def normalize_file_path(file_path: str) -> str:
     return source_file
 
 
+def prepare_file_for_transcription(source_file: str) -> str:
+    """Copy small files or extract compressed audio from large media files."""
+    temp_dir = tempfile.gettempdir()
+    next_v = get_next_recording_version(temp_dir)
+    stem = os.path.join(temp_dir, f"aitranscribe_record_v{next_v:03d}")
+
+    if os.path.getsize(source_file) > MAX_AUDIO_SIZE_MB * 1024 * 1024:
+        return compress_audio(source_file, output_path=f"{stem}.mp3")
+
+    extension = os.path.splitext(source_file)[1] or ".mp3"
+    working_file = f"{stem}{extension}"
+    try:
+        shutil.copy2(source_file, working_file)
+        return working_file
+    except OSError as exc:
+        console.print(f"Warning: Could not copy file to temp directory: {exc}. Using original file: {source_file}")
+        return source_file
+
+
 def process_file_for_tui(
     file_path: str,
     settings: dict[str, Any],
@@ -1048,51 +1067,37 @@ def process_file_for_tui(
     if not os.path.exists(source_file):
         raise FileNotFoundError(f"File not found: {source_file}")
 
-    temp_dir = tempfile.gettempdir()
-    next_v = get_next_recording_version(temp_dir)
-    extension = os.path.splitext(source_file)[1] or ".mp3"
-    working_file = os.path.join(temp_dir, f"aitranscribe_record_v{next_v:03d}{extension}")
-
-    try:
-        shutil.copy2(source_file, working_file)
-        file_for_processing = working_file
-    except Exception:
-        console.print(f"Warning: Could not copy file to temp directory. Using original file: {source_file}")
-        file_for_processing = source_file
-
     def update_feedback(step_id: str, status: str) -> None:
         if feedback_callback:
             feedback_callback(step_id, status)
 
-    try:
-        update_feedback("compress", "done")
+    update_feedback("compress", "active")
+    file_for_processing = prepare_file_for_transcription(source_file)
+    update_feedback("compress", "done")
 
-        final_text, raw_text = run_transcription_pipeline(
-            file_for_processing,
-            stt_model=str(settings.get("stt_model", GROQ_STT_MODEL)),
-            llm_model=str(settings.get("llm_model", LLM_MODEL)),
-            needs_llm=needs_llm,
-            target_language=target_language,
-            do_chunk=True,
-            on_transcript=transcript_callback,
-            on_feedback=update_feedback,
-        )
+    final_text, raw_text = run_transcription_pipeline(
+        file_for_processing,
+        stt_model=str(settings.get("stt_model", GROQ_STT_MODEL)),
+        llm_model=str(settings.get("llm_model", LLM_MODEL)),
+        needs_llm=needs_llm,
+        target_language=target_language,
+        do_chunk=True,
+        on_transcript=transcript_callback,
+        on_feedback=update_feedback,
+    )
 
-        append_mode = bool(settings.get("append_mode", False))
-        if append_mode:
-            prompt_id = None
-        else:
-            prompt_id = prompt_manager.add_prompt(final_text, file_for_processing)
-        return {
-            "text": final_text or "No transcript returned.",
-            "raw_text": raw_text,
-            "file_path": file_for_processing,
-            "prompt_id": str(prompt_id) if prompt_id is not None else "",
-        }
-    except Exception:
-        if file_for_processing == working_file and os.path.exists(working_file):
-            pass
-        raise
+    append_mode = bool(settings.get("append_mode", False))
+    if append_mode:
+        prompt_id = None
+    else:
+        prompt_id = prompt_manager.add_prompt(final_text, file_for_processing)
+    return {
+        "text": final_text or "No transcript returned.",
+        "raw_text": raw_text,
+        "file_path": file_for_processing,
+        "prompt_id": str(prompt_id) if prompt_id is not None else "",
+    }
+
 
 
 def _read_terminal_title() -> str | None:
@@ -1294,22 +1299,8 @@ def transcribe_file(file_path: str, stt_model: str, llm_model: str, post_process
         console.print(f"Error: File not found: {file_path}")
         raise typer.Exit(code=1)
 
-    temp_dir = tempfile.gettempdir()
-    next_v = get_next_recording_version(temp_dir)
-
-    ext = os.path.splitext(file_path)[1]
-    if not ext:
-        ext = ".mp3"
-
-    temp_file_path = os.path.join(temp_dir, f"aitranscribe_record_v{next_v:03d}{ext}")
     try:
-        shutil.copy2(file_path, temp_file_path)
-        file_path = temp_file_path
-        console.print(f"Copied file to temp location: {file_path}")
-    except Exception as e:
-        console.print(f"Warning: Could not copy file to temp directory: {e}")
-
-    try:
+        file_path = prepare_file_for_transcription(file_path)
         if needs_llm:
             console.print(f"\nPost-Processing: {'Translate to English + Cleanup' if english else 'Cleanup'}")
 

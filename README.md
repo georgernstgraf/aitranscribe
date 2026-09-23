@@ -44,7 +44,7 @@ On Windows, add the repo directory to `PATH` and use `aitranscribe.bat`.
 ## Prerequisites
 
 - **Python 3.10+**
-- **FFmpeg** – required for audio compression and chunking (`brew install ffmpeg`, `apt install ffmpeg`, `winget install ffmpeg`)
+- **FFmpeg** (including `ffprobe`) – required for audio compression and chunking (`brew install ffmpeg`, `apt install ffmpeg`, `winget install --id Gyan.FFmpeg --exact`). Restart the terminal after installing it on Windows.
 - **Clipboard helpers** (for the TUI copy action): `xclip` (X11) or `wl-clipboard` (Wayland) on Linux
 - **PortAudio** (libportaudio) – needed for microphone recording on most systems
 

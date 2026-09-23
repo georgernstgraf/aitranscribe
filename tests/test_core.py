@@ -38,6 +38,11 @@ def test_ffmpeg_failure_raises_runtime_error_with_stderr():
     assert "exit 1" in exc_info.value.args[0]
     assert "bad option" in exc_info.value.args[0]
 
+def test_ffmpeg_missing_reports_installation_requirement():
+    with patch("core.subprocess.run", side_effect=FileNotFoundError):
+        with pytest.raises(RuntimeError, match="ffmpeg is required"):
+            _ffmpeg("-i", "in.wav", "out.mp3")
+
 # --- _ffprobe ---
 
 def test_ffprobe_returns_duration_dict():
@@ -55,6 +60,11 @@ def test_ffprobe_failure_raises_runtime_error_with_stderr():
     assert "exit 2" in exc_info.value.args[0]
     assert "no such file" in exc_info.value.args[0]
 
+def test_ffprobe_missing_reports_installation_requirement():
+    with patch("core.subprocess.run", side_effect=FileNotFoundError):
+        with pytest.raises(RuntimeError, match="ffprobe is required"):
+            _ffprobe("file.mp3")
+
 # --- get_audio_duration ---
 
 def test_get_audio_duration_parses_ffprobe_output():
@@ -71,7 +81,7 @@ def test_compress_audio_default_output_path(tmp_path):
         expected.write_bytes(b"audio")
         out = compress_audio(str(src))
     assert out == str(expected)
-    mock_ffmpeg.assert_called_once_with("-i", str(src), "-b:a", "32k", out)
+    mock_ffmpeg.assert_called_once_with("-i", str(src), "-map", "0:a:0", "-vn", "-b:a", "32k", out)
 
 def test_compress_audio_explicit_output_path(tmp_path):
     src = tmp_path / "recording.wav"
@@ -81,7 +91,7 @@ def test_compress_audio_explicit_output_path(tmp_path):
         explicit.write_bytes(b"audio")
         out = compress_audio(str(src), output_path=str(explicit))
     assert out == str(explicit)
-    mock_ffmpeg.assert_called_once_with("-i", str(src), "-b:a", "32k", str(explicit))
+    mock_ffmpeg.assert_called_once_with("-i", str(src), "-map", "0:a:0", "-vn", "-b:a", "32k", str(explicit))
 
 def test_compress_audio_missing_output_raises(tmp_path):
     src = tmp_path / "recording.wav"
@@ -176,17 +186,35 @@ def test_chunk_audio_invalid_duration_raises(tmp_path):
     assert str(src) in exc_info.value.args[0]
     mock_ffmpeg.assert_not_called()
 
+def test_chunk_audio_large_file_preserves_probe_failure(tmp_path):
+    src = tmp_path / "big.mp3"
+    src.write_bytes(b"x")
+    with patch("core.os.path.getsize", return_value=50 * 1024 * 1024), \
+         patch("core.get_audio_duration", side_effect=RuntimeError("ffprobe is required")):
+        with pytest.raises(RuntimeError, match="ffprobe is required"):
+            chunk_audio(str(src))
+
 def test_chunk_audio_small_but_long_file_splits_by_duration(tmp_path):
     src = tmp_path / "meeting.m4a"
     src.write_bytes(b"x")
     # 1 MB over 2569s (43 min): under the size limit, but over 600s duration.
-    # 2569 / ceil(2569/600)=5 -> 513s segments (size-derived value is far larger).
+    # 2569 / ceil(2569/600)=5 -> 514s segments (size-derived value is far larger).
     with patch("core.os.path.getsize", return_value=1 * 1024 * 1024), \
          patch("core.get_audio_duration", return_value=2569.0), \
          patch("core._ffmpeg") as mock_ffmpeg:
         chunk_audio(str(src))
     args = mock_ffmpeg.call_args.args
-    assert args[args.index("-segment_time") + 1] == "513"
+    assert args[args.index("-segment_time") + 1] == "514"
+
+def test_chunk_audio_ceil_prevents_tiny_extra_chunk(tmp_path):
+    src = tmp_path / "interview.mp3"
+    src.write_bytes(b"x")
+    with patch("core.os.path.getsize", return_value=9 * 1024 * 1024), \
+         patch("core.get_audio_duration", return_value=2341.95), \
+         patch("core._ffmpeg") as mock_ffmpeg:
+        chunk_audio(str(src))
+    args = mock_ffmpeg.call_args.args
+    assert args[args.index("-segment_time") + 1] == "586"
 
 def test_chunk_audio_duration_limit_wins_over_size_limit(tmp_path):
     src = tmp_path / "big.mp3"

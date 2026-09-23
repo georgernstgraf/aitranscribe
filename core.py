@@ -4,11 +4,16 @@ import subprocess
 from pathlib import Path
 from openai import OpenAI
 
+MAX_AUDIO_SIZE_MB = 25
+
 
 def _ffmpeg(*args: str) -> None:
     """Run ffmpeg with given arguments. Raises RuntimeError on failure."""
     cmd = ["ffmpeg", "-y", *args]
-    result = subprocess.run(cmd, capture_output=True, text=True)
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True)
+    except FileNotFoundError as exc:
+        raise RuntimeError("ffmpeg is required for audio processing; install FFmpeg and restart the terminal.") from exc
     if result.returncode != 0:
         raise RuntimeError(
             f"ffmpeg failed (exit {result.returncode}): {result.stderr.strip()}"
@@ -23,7 +28,10 @@ def _ffprobe(file_path: str) -> dict[str, str]:
         "-of", "compact=p=0:nk=1",
         file_path,
     ]
-    result = subprocess.run(cmd, capture_output=True, text=True)
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True)
+    except FileNotFoundError as exc:
+        raise RuntimeError("ffprobe is required for audio processing; install FFmpeg and restart the terminal.") from exc
     if result.returncode != 0:
         raise RuntimeError(
             f"ffprobe failed (exit {result.returncode}): {result.stderr.strip()}"
@@ -43,7 +51,7 @@ def compress_audio(file_path: str, output_path: str | None = None) -> str:
         file_name = Path(file_path).stem
         output_dir = Path(file_path).parent
         output_path = str(output_dir / f"{file_name}_compressed.mp3")
-    _ffmpeg("-i", file_path, "-b:a", "32k", output_path)
+    _ffmpeg("-i", file_path, "-map", "0:a:0", "-vn", "-b:a", "32k", output_path)
     if not os.path.isfile(output_path) or os.path.getsize(output_path) == 0:
         raise RuntimeError(
             f"ffmpeg reported success but produced no output: {output_path}"
@@ -51,7 +59,7 @@ def compress_audio(file_path: str, output_path: str | None = None) -> str:
     return output_path
 
 
-def chunk_audio(file_path: str, max_size_mb: int = 25, max_duration_s: int = 600) -> list[str]:
+def chunk_audio(file_path: str, max_size_mb: int = MAX_AUDIO_SIZE_MB, max_duration_s: int = 600) -> list[str]:
     """Split audio into chunks sized to stay under max_size_mb and max_duration_s.
 
     Segment length is the smaller of the size-derived value (from the file's
@@ -64,8 +72,10 @@ def chunk_audio(file_path: str, max_size_mb: int = 25, max_duration_s: int = 600
     file_size_mb = os.path.getsize(file_path) / (1024 * 1024)
     try:
         duration = get_audio_duration(file_path)
-    except Exception:
-        duration = 0.0
+    except Exception as exc:
+        if file_size_mb <= max_size_mb:
+            return [file_path]
+        raise RuntimeError(f"Cannot determine audio duration for {file_path}: {exc}") from exc
     if file_size_mb <= max_size_mb and (duration <= 0 or duration <= max_duration_s):
         return [file_path]
 
@@ -76,7 +86,7 @@ def chunk_audio(file_path: str, max_size_mb: int = 25, max_duration_s: int = 600
     rate_mb_per_s = file_size_mb / duration
     size_based = int((max_size_mb / rate_mb_per_s) * 0.95)
     num_chunks = max(1, math.ceil(duration / max_duration_s))
-    duration_based = int(duration / num_chunks)
+    duration_based = math.ceil(duration / num_chunks)
     segment_time = max(60, min(size_based, duration_based))
 
     file_name = Path(file_path).stem

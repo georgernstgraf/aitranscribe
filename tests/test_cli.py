@@ -574,6 +574,35 @@ def test_process_file_for_tui_raw_mode_bypasses_llm(tmp_path):
     fake_manager.add_prompt.assert_called_once_with("raw words", result["file_path"])
 
 
+def test_prepare_file_for_transcription_extracts_large_media_without_copy(tmp_path):
+    """Large video must become audio before the size-based chunking decision."""
+    import main
+
+    src = tmp_path / "interview.mp3"
+    src.write_bytes(b"MP4 container with video and audio")
+    with patch("main.tempfile.gettempdir", return_value=str(tmp_path)), \
+         patch("main.os.path.getsize", return_value=2500 * 1024 * 1024), \
+         patch("main.shutil.copy2") as mock_copy, \
+         patch("main.compress_audio", side_effect=lambda source, output_path: output_path) as mock_compress:
+        prepared = main.prepare_file_for_transcription(str(src))
+
+    assert prepared == str(tmp_path / "aitranscribe_record_v001.mp3")
+    mock_compress.assert_called_once_with(str(src), output_path=prepared)
+    mock_copy.assert_not_called()
+
+
+def test_prepare_file_for_transcription_copies_small_media(tmp_path):
+    import main
+
+    src = tmp_path / "short.m4a"
+    src.write_bytes(b"small audio")
+    with patch("main.tempfile.gettempdir", return_value=str(tmp_path)):
+        prepared = main.prepare_file_for_transcription(str(src))
+
+    assert Path(prepared).read_bytes() == src.read_bytes()
+    assert prepared.endswith(".m4a")
+
+
 @pytest.mark.parametrize("quote", ['"', "'"])
 def test_process_file_for_tui_accepts_quoted_path(tmp_path, quote):
     """A shell-quoted path pasted into the TUI must resolve to the real file."""
