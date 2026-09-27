@@ -57,7 +57,7 @@ The terminal UI is built with [Textual](https://textual.textualize.io/) and divi
 - **Feedback Log** – live status of compression, transcription, and LLM post-processing steps
 - **Transcriptions** – list of saved transcriptions with auto-generated summaries; arrow keys to preview
 - **Recording Mode** – switch between microphone and filesystem file as input
-- **Configuration** – STT model and LLM model fields
+- **Configuration** – STT model, LLM model, and output line width (0/80/120)
 
 ### Keybindings
 
@@ -102,6 +102,7 @@ aitranscribe --file meeting.mp3                          # transcribe a file
 aitranscribe --file speech.mp3 --english                 # transcribe + translate to English
 aitranscribe --file podcast.mp3 --post-process           # transcribe + cleanup
 aitranscribe --post-process "Summarize this recording"   # custom LLM prompt
+aitranscribe --width 120 --file meeting.mp3              # wrap output at 120 chars/line
 aitranscribe --list                                      # show stored transcriptions
 aitranscribe --query                                     # pop the oldest transcription
 aitranscribe --remove 3                                  # remove transcription #3
@@ -136,9 +137,14 @@ The configuration file also remembers TUI state:
 PRE_PROCESS_MODE="english"       # raw, cleanup, or english
 LAST_FILE_PATH=""                # last used file path
 VERBOSE_ERRORS="false"           # show detailed errors
+OUTPUT_WIDTH="80"                # wrap output at 0 (off), 80, or 120 chars/line
 ```
 
 The recording mode (microphone vs filesystem file) is chosen per session in the TUI and always starts as microphone on launch.
+
+### Output wrapping
+
+Transcriptions (terminal output, TUI transcript, and stored history) can be wrapped at 80 or 120 characters per line; a line break replaces the space at the wrap point. Long unbreakable tokens (e.g. URLs) are left intact. Configure it with `OUTPUT_WIDTH` in the config file, the `--width` CLI flag (`0`, `80`, or `120`), or the **Output width** control in the TUI's Configuration panel. `0` disables wrapping. Because wrapped text is stored as-is, changing the width affects newly produced transcriptions.
 
 ## Project structure
 

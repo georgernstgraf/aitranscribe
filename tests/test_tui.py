@@ -890,6 +890,85 @@ async def test_preprocess_radio_selection_reaches_file_settings():
         assert app.collect_settings()["pre_process_mode"] == "raw"
 
 
+def test_tui_output_width_defaults_to_80():
+    app = AitranscribeTUI(
+        prompt_manager=Mock(),
+        process_audio=Mock(),
+        process_file=Mock(),
+        stt_provider_name="Groq",
+        llm_provider_name="openrouter",
+        default_stt_model="whisper",
+        default_llm_model="gpt",
+        initial_settings={"pre_process_mode": "english", "input_source": "microphone"},
+    )
+
+    assert app.output_width == 80
+
+
+def test_tui_reads_output_width_from_settings():
+    app = AitranscribeTUI(
+        prompt_manager=Mock(),
+        process_audio=Mock(),
+        process_file=Mock(),
+        stt_provider_name="Groq",
+        llm_provider_name="openrouter",
+        default_stt_model="whisper",
+        default_llm_model="gpt",
+        initial_settings={"pre_process_mode": "english", "input_source": "microphone", "output_width": 120},
+    )
+
+    assert app.output_width == 120
+
+
+def test_apply_output_width_delegates_to_callback():
+    wrap = Mock(return_value="WRAPPED")
+    app = AitranscribeTUI(
+        prompt_manager=Mock(),
+        process_audio=Mock(),
+        process_file=Mock(),
+        stt_provider_name="Groq",
+        llm_provider_name="openrouter",
+        default_stt_model="whisper",
+        default_llm_model="gpt",
+        initial_settings={"pre_process_mode": "english", "input_source": "microphone", "output_width": 120},
+        wrap_output=wrap,
+    )
+
+    assert app.apply_output_width("some text") == "WRAPPED"
+    wrap.assert_called_once_with("some text", 120)
+
+
+@pytest.mark.anyio
+async def test_output_width_radio_selection_persists_and_collects():
+    prompt_manager = Mock()
+    prompt_manager.count_prompts.return_value = 0
+    prompt_manager.recent_prompts.return_value = []
+
+    persist = Mock()
+    app = AitranscribeTUI(
+        prompt_manager=prompt_manager,
+        process_audio=Mock(),
+        process_file=Mock(),
+        stt_provider_name="Groq",
+        llm_provider_name="openrouter",
+        default_stt_model="whisper",
+        default_llm_model="gpt",
+        initial_settings={"pre_process_mode": "english", "input_source": "microphone", "output_width": 80},
+        persist_setting=persist,
+    )
+
+    async with app.run_test() as pilot:
+        assert app.output_width == 80
+        event = Mock()
+        event.radio_set = Mock(id="output_width_modes")
+        event.pressed = Mock(id="width-120")
+        app.on_radio_set_changed(event)
+        assert app.output_width == 120
+        assert app.collect_settings()["output_width"] == 120
+
+    persist.assert_called_once_with("output_width", 120)
+
+
 @pytest.mark.anyio
 async def test_file_path_input_accepts_keyboard_entry():
     prompt_manager = Mock()

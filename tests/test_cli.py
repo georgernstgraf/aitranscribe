@@ -20,6 +20,7 @@ try:
         llm_model_option,
         verbose_option,
         english_option,
+        output_width_option,
         help_option,
         file_option,
         file_path_argument,
@@ -95,6 +96,21 @@ def test_cli_defaults_to_tui_launch():
         result = runner.invoke(app, [])
         assert result.exit_code == 0
         mock_launch_tui.assert_called_once()
+
+
+def test_cli_width_override_passed_to_tui():
+    """--width overrides the output width for the TUI session."""
+    with patch("main.launch_tui") as mock_launch_tui:
+        result = runner.invoke(app, ["--width", "120"])
+        assert result.exit_code == 0
+        mock_launch_tui.assert_called_once_with(width_override=120)
+
+
+def test_cli_rejects_invalid_width():
+    """--width only accepts 0, 80 or 120."""
+    result = runner.invoke(app, ["--width", "999"])
+    assert result.exit_code == 1
+    assert "--width must be one of" in result.stdout
 
 
 # ==================== Option Factory Tests ====================
@@ -195,6 +211,12 @@ def test_remove_prompt_option():
     """Test that remove_prompt_option returns correct typer.Option."""
     option = remove_prompt_option()
     assert isinstance(option, typer.models.OptionInfo)
+
+def test_output_width_option():
+    """Test that output_width_option returns a typer.Option defaulting to None."""
+    option = output_width_option()
+    assert isinstance(option, typer.models.OptionInfo)
+    assert option.default is None
 
 # ==================== Logic Helper Tests ====================
 
@@ -388,6 +410,65 @@ def test_get_tui_settings_always_starts_microphone(tmp_path):
         settings = get_tui_settings()
 
     assert settings["input_source"] == "microphone"
+
+
+def test_normalize_output_width():
+    """Only 0, 80 and 120 are accepted; everything else falls back to 80."""
+    import main
+
+    assert main._normalize_output_width("80") == 80
+    assert main._normalize_output_width(120) == 120
+    assert main._normalize_output_width("0") == 0
+    assert main._normalize_output_width("999") == 80
+    assert main._normalize_output_width("nonsense") == 80
+    assert main._normalize_output_width(None) == 80
+
+
+def test_get_tui_settings_includes_output_width(tmp_path):
+    """OUTPUT_WIDTH from the config is exposed to the TUI."""
+    config_file = tmp_path / "aitranscribe.conf"
+    config_file.write_text('OUTPUT_WIDTH="120"\n')
+
+    with patch("main.CONFIG_FILE", config_file), patch("main.GROQ_STT_MODEL", "whisper"), patch("main.LLM_MODEL", "gpt"):
+        settings = get_tui_settings()
+
+    assert settings["output_width"] == 120
+
+
+def test_get_tui_settings_defaults_output_width(tmp_path):
+    """Missing OUTPUT_WIDTH falls back to the 80-char default."""
+    config_file = tmp_path / "aitranscribe.conf"
+    config_file.write_text("")
+
+    with patch("main.CONFIG_FILE", config_file), patch("main.GROQ_STT_MODEL", "whisper"), patch("main.LLM_MODEL", "gpt"):
+        settings = get_tui_settings()
+
+    assert settings["output_width"] == 80
+
+
+def test_create_default_config_includes_output_width(tmp_path):
+    """The generated config documents OUTPUT_WIDTH."""
+    import main
+
+    config_file = tmp_path / "aitranscribe.conf"
+    with patch.object(main, "CONFIG_FILE", config_file), patch.object(main, "CONFIG_DIR", tmp_path):
+        main._create_default_config()
+
+    assert 'OUTPUT_WIDTH="80"' in config_file.read_text()
+
+
+def test_persist_tui_setting_output_width():
+    """Persisting the width updates OUTPUT_WIDTH and writes OUTPUT_WIDTH."""
+    import main
+
+    original = main.OUTPUT_WIDTH
+    try:
+        with patch("main.persist_config_value") as mock_persist:
+            main.persist_tui_setting("output_width", 120)
+        mock_persist.assert_called_once_with("OUTPUT_WIDTH", "120")
+        assert main.OUTPUT_WIDTH == 120
+    finally:
+        main.OUTPUT_WIDTH = original
 
 def test_validate_api_keys_with_stt_client_none():
     """Test that validate_api_keys fails when stt_client is None."""
@@ -673,6 +754,55 @@ def test_wrap_text_whitespace():
     assert lines[1] == "text wrapping"
     assert lines[2] == "functionality"
 
+
+def test_wrap_text_width_120():
+    """A 120-char width wraps long text at 120 characters per line."""
+    text = " ".join(["word"] * 40)
+    result = wrap_text(text, 120)
+    lines = result.split("\n")
+    assert len(lines) > 1
+    assert all(len(line) <= 120 for line in lines)
+
+
+def test_wrap_text_disabled_with_zero():
+    """Width 0 leaves the text untouched."""
+    text = "x" * 300
+    assert wrap_text(text, 0) == text
+
+
+def test_wrap_text_preserves_existing_lines():
+    """Short lines and intentional line breaks are left intact."""
+    text = "Short line\nAnother short line"
+    assert wrap_text(text, 20) == text
+
+
+def test_wrap_text_is_idempotent():
+    """Wrapping already-wrapped text must not change it again."""
+    text = "This is a fairly long sentence that will need to be wrapped more than once at a small width"
+    once = wrap_text(text, 30)
+    assert "\n" in once
+    assert wrap_text(once, 30) == once
+
+
+def test_wrap_text_keeps_long_words_intact():
+    """Unbreakable tokens (URLs) are not split mid-word."""
+    url = "https://example.com/" + "a" * 100
+    result = wrap_text(url, 40)
+    assert url in result
+
+
+def test_wrap_text_uses_configured_default_width():
+    """Calling wrap_text without a width uses the module OUTPUT_WIDTH."""
+    import main
+
+    original = main.OUTPUT_WIDTH
+    try:
+        main.OUTPUT_WIDTH = 20
+        text = "This is a test of text wrapping functionality"
+        assert len(wrap_text(text).split("\n")) == 3
+    finally:
+        main.OUTPUT_WIDTH = original
+
 def test_promptmanager_query_prompt_empty():
     """Test PromptManager.query_prompt with empty queue."""
     with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f:
@@ -783,6 +913,34 @@ def test_promptmanager_update_prompt_by_id():
         assert manager.recent_prompts()[0]["prompt"] == "Edited"
     finally:
         temp_file.unlink()
+
+
+def test_promptmanager_wraps_long_text_on_add_and_update(tmp_path):
+    """Stored transcripts are wrapped at the configured OUTPUT_WIDTH."""
+    import main
+
+    manager = PromptManager(tmp_path / "p.sqlite")
+    long_text = " ".join(["word"] * 60)
+    original = main.OUTPUT_WIDTH
+    try:
+        main.OUTPUT_WIDTH = 80
+        prompt_id = manager.add_prompt(long_text, "file.mp3")
+        stored = manager.recent_prompts()[0]["prompt"]
+        assert "\n" in stored
+        assert all(len(line) <= 80 for line in stored.split("\n"))
+
+        manager.update_prompt(prompt_id, long_text + " " + long_text)
+        updated = manager.recent_prompts()[0]["prompt"]
+        assert all(len(line) <= 80 for line in updated.split("\n"))
+    finally:
+        main.OUTPUT_WIDTH = original
+
+
+def test_promptmanager_stores_short_text_unchanged(tmp_path):
+    """Short transcripts are stored untouched."""
+    manager = PromptManager(tmp_path / "p.sqlite")
+    manager.add_prompt("Short text", "file.mp3")
+    assert manager.recent_prompts()[0]["prompt"] == "Short text"
 
 
 def test_promptmanager_migrates_existing_database_to_add_summary_column():

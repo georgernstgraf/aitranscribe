@@ -3,6 +3,7 @@ import time
 import os
 import re
 import shutil
+import textwrap
 import tomllib
 import copy
 import typer
@@ -92,6 +93,7 @@ def _create_default_config() -> None:
         f.write('PRE_PROCESS_MODE="english"\n')
         f.write('LAST_FILE_PATH=""\n')
         f.write('VERBOSE_ERRORS="false"\n')
+        f.write('OUTPUT_WIDTH="80"\n')
         # Single quotes to avoid dotenv escape handling of \a, \b, \f, \n, etc.
         f.write(f"\nPROMPTS_FILE='{PROMPTS_FILE}'\n")
     console.print(f"Created configuration at {CONFIG_FILE}")
@@ -106,6 +108,7 @@ _MIGRATION_BLOCKS: list[tuple[str, str]] = [
     ("PRE_PROCESS_MODE", '\n# TUI Defaults\nPRE_PROCESS_MODE="english"\n'),
     ("LAST_FILE_PATH", 'LAST_FILE_PATH=""\n'),
     ("VERBOSE_ERRORS", 'VERBOSE_ERRORS="false"\n'),
+    ("OUTPUT_WIDTH", '\n# Output line wrapping: 0 (off), 80, or 120\nOUTPUT_WIDTH="80"\n'),
 ]
 
 def _migrate_config() -> None:
@@ -346,8 +349,21 @@ def _normalize_pre_process_mode(value: str | None) -> str:
     return normalized if normalized in _PRE_PROCESS_MODES else "english"
 
 
+_ALLOWED_OUTPUT_WIDTHS = (0, 80, 120)
+
+
+def _normalize_output_width(value: Any) -> int:
+    try:
+        width = int(str(value).strip())
+    except (TypeError, ValueError):
+        return DEFAULT_OUTPUT_WIDTH
+    return width if width in _ALLOWED_OUTPUT_WIDTHS else DEFAULT_OUTPUT_WIDTH
+
+
 DEFAULT_PRE_PROCESS_MODE: str = "english"
 DEFAULT_VERBOSE_ERRORS: bool = False
+DEFAULT_OUTPUT_WIDTH: int = 80
+OUTPUT_WIDTH: int = DEFAULT_OUTPUT_WIDTH
 
 def _get_llm_client() -> OpenAI | None:
     if LLM_PROVIDER not in LLM_PROVIDERS:
@@ -439,6 +455,7 @@ def persist_config_value(key: str, value: str, *, config_file: Path = CONFIG_FIL
 
 
 def persist_tui_setting(setting_name: str, value: Any) -> None:
+    global OUTPUT_WIDTH
     if setting_name == "pre_process_mode":
         persist_config_value("PRE_PROCESS_MODE", _normalize_pre_process_mode(str(value)))
         return
@@ -447,6 +464,10 @@ def persist_tui_setting(setting_name: str, value: Any) -> None:
         return
     if setting_name == "verbose":
         persist_config_value("VERBOSE_ERRORS", "true" if bool(value) else "false")
+        return
+    if setting_name == "output_width":
+        OUTPUT_WIDTH = _normalize_output_width(value)
+        persist_config_value("OUTPUT_WIDTH", str(OUTPUT_WIDTH))
         return
     if setting_name == "stt_model":
         persist_config_value("GROQ_STT_MODEL", str(value).strip() or GROQ_STT_MODEL)
@@ -467,6 +488,7 @@ def get_tui_settings() -> dict[str, Any]:
         "stt_model": (config.get("GROQ_STT_MODEL") or GROQ_STT_MODEL or "whisper-large-v3-turbo").strip(),
         "llm_model": (config.get(provider["env_model"]) or LLM_MODEL or provider["default_model"]).strip(),
         "verbose": str(config.get("VERBOSE_ERRORS", str(DEFAULT_VERBOSE_ERRORS))).strip().lower() in {"1", "true", "yes", "on"},
+        "output_width": _normalize_output_width(config.get("OUTPUT_WIDTH", DEFAULT_OUTPUT_WIDTH)),
     }
 
 stt_client: OpenAI | None = None
@@ -488,6 +510,9 @@ def verbose_option():
 
 def english_option():
     return typer.Option(False, "--english", "-e", help="Translate to spoken text to English")
+
+def output_width_option():
+    return typer.Option(None, "--width", "-w", help="Wrap output at 0 (off), 80, or 120 characters per line")
 
 def help_option():
     return typer.Option(False, "--help", "-h", is_eager=True)
@@ -570,28 +595,33 @@ def require_llm_client() -> OpenAI:
     return llm_client
 
 
-def wrap_text(text: str, max_length: int = 80) -> str:
-    """Wrap text to specified max length, breaking at whitespace."""
-    if len(text) <= max_length:
+def wrap_text(text: str, max_length: int | None = None) -> str:
+    """Wrap overlong lines at whitespace, preserving existing line breaks.
+
+    ``max_length`` defaults to the configured ``OUTPUT_WIDTH``. A width of
+    0 (or less) disables wrapping. Lines that already fit are left untouched,
+    so wrapping is idempotent and markdown/list structure survives.
+    """
+    width = OUTPUT_WIDTH if max_length is None else max_length
+    if width is None or width <= 0 or not text:
         return text
 
-    words = text.split()
-    wrapped_lines = []
-    current_line = ""
-
-    for word in words:
-        if len(current_line + " " + word) <= max_length:
-            if current_line:
-                current_line += " " + word
-            else:
-                current_line = word
-        else:
-            wrapped_lines.append(current_line.strip())
-            current_line = word
-
-    if current_line.strip():
-        wrapped_lines.append(current_line.strip())
-
+    wrapped_lines: list[str] = []
+    for line in text.split("\n"):
+        if len(line) <= width:
+            wrapped_lines.append(line)
+            continue
+        wrapped_lines.extend(
+            textwrap.wrap(
+                line,
+                width=width,
+                break_long_words=False,
+                break_on_hyphens=False,
+                replace_whitespace=False,
+                drop_whitespace=True,
+            )
+            or [""]
+        )
     return "\n".join(wrapped_lines)
 
 # Prompt Manager Class
@@ -697,7 +727,7 @@ class PromptManager:
                 INSERT INTO prompts (prompt, filename, created_at, summary)
                 VALUES (?, ?, ?, ?)
                 """,
-                (prompt, filename, created_at, summary),
+                (wrap_text(prompt), filename, created_at, summary),
             )
             lastrowid = cursor.lastrowid
             return int(lastrowid) if lastrowid is not None else None
@@ -707,7 +737,7 @@ class PromptManager:
         with self._connect() as conn:
             cursor = conn.execute(
                 "UPDATE prompts SET prompt = ? WHERE id = ?",
-                (prompt, prompt_id),
+                (wrap_text(prompt), prompt_id),
             )
             return cursor.rowcount > 0
 
@@ -856,7 +886,7 @@ def init_app() -> None:
     """Run all setup that used to happen at import time. Idempotent."""
     global _initialized, PROMPTS_FILE, GROQ_API_KEY, GROQ_STT_MODEL, LLM_PROVIDER
     global PROMPTS, stt_client, llm_client, LLM_MODEL, prompt_manager
-    global DEFAULT_PRE_PROCESS_MODE, DEFAULT_VERBOSE_ERRORS
+    global DEFAULT_PRE_PROCESS_MODE, DEFAULT_VERBOSE_ERRORS, OUTPUT_WIDTH
     if _initialized:
         return
 
@@ -874,6 +904,7 @@ def init_app() -> None:
 
     DEFAULT_PRE_PROCESS_MODE = _normalize_pre_process_mode(os.getenv("PRE_PROCESS_MODE", "english"))
     DEFAULT_VERBOSE_ERRORS = _env_flag("VERBOSE_ERRORS", False)
+    OUTPUT_WIDTH = _normalize_output_width(os.getenv("OUTPUT_WIDTH", DEFAULT_OUTPUT_WIDTH))
 
     PROMPTS = _load_prompts()
 
@@ -1007,8 +1038,9 @@ def process_recorded_audio_for_tui(
         else:
             prompt_id = prompt_manager.add_prompt(final_text, final_mp3_file)
 
+        display_text = wrap_text(final_text, settings.get("output_width", OUTPUT_WIDTH))
         return {
-            "text": final_text,
+            "text": display_text,
             "raw_text": transcript,
             "file_path": final_mp3_file,
             "prompt_id": str(prompt_id) if prompt_id is not None else "",
@@ -1091,8 +1123,9 @@ def process_file_for_tui(
         prompt_id = None
     else:
         prompt_id = prompt_manager.add_prompt(final_text, file_for_processing)
+    display_text = wrap_text(final_text or "No transcript returned.", settings.get("output_width", OUTPUT_WIDTH))
     return {
-        "text": final_text or "No transcript returned.",
+        "text": display_text,
         "raw_text": raw_text,
         "file_path": file_for_processing,
         "prompt_id": str(prompt_id) if prompt_id is not None else "",
@@ -1156,10 +1189,12 @@ def restore_terminal_title(previous: str | None) -> None:
         sys.stdout.flush()
 
 
-def launch_tui() -> None:
+def launch_tui(width_override: int | None = None) -> None:
     from tui import AitranscribeTUI
 
     settings = get_tui_settings()
+    if width_override is not None:
+        settings["output_width"] = width_override
     app = AitranscribeTUI(
         prompt_manager=prompt_manager,
         process_audio=process_recorded_audio_for_tui,
@@ -1173,6 +1208,7 @@ def launch_tui() -> None:
         generate_summary=generate_prompt_summary,
         backfill_summaries=lambda: backfill_missing_summaries(prompt_manager, settings["llm_model"]),
         translate_text=translate_text,
+        wrap_output=lambda text, width=None: wrap_text(text, width),
     )
     previous_title: str | None = None
     try:
@@ -1204,11 +1240,13 @@ def main(
     post_process: bool = post_process_option(),
     stt_model: str | None = stt_model_option(),
     verbose: bool = verbose_option(),
+    width: int | None = output_width_option(),
     help: bool = help_option(),
 ):
     """
     aitranscribe: TUI-first terminal app for STT and LLM post-processing.
     """
+    global OUTPUT_WIDTH
     if help:
         typer.echo(ctx.get_help())
         typer.echo()
@@ -1218,6 +1256,13 @@ def main(
         return
 
     init_app()
+
+    if width is not None:
+        if width not in _ALLOWED_OUTPUT_WIDTHS:
+            allowed = ", ".join(str(value) for value in _ALLOWED_OUTPUT_WIDTHS)
+            console.print(f"Error: --width must be one of {allowed}.")
+            raise typer.Exit(code=1)
+        OUTPUT_WIDTH = width
 
     if stt_model is None:
         stt_model = GROQ_STT_MODEL
@@ -1241,7 +1286,7 @@ def main(
     )
 
     if not legacy_mode_requested:
-        launch_tui()
+        launch_tui(width_override=width)
         raise typer.Exit(code=0)
 
     # Enforce mutual exclusivity between --english and --post-process

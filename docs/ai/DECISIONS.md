@@ -198,3 +198,9 @@ Each entry documents WHAT was decided and WHY.
 - **Choice**: Filesystem inputs above the 25 MB upload threshold are converted directly to a 32 kbps MP3 audio stream before duration-based chunking. TUI and CLI share the preparation function.
 - **Reason**: A 2.36 GiB MP4 video mislabeled `.mp3` cannot be split safely by its video bitrate, and copying it first wastes disk space.
 - **Tradeoff**: Large audio files are re-encoded once before transcription; the smaller output makes chunk sizes predictable.
+
+## 2026-09-27: Configurable Output Line Wrapping (0/80/120)
+- **Choice**: Add an `OUTPUT_WIDTH` setting (`0` off, `80` default, `120`) exposed via config file, `--width` CLI flag, and a TUI Configuration radio. `wrap_text(text, max_length=None)` is rewritten around `textwrap`, wraps only overlong lines (preserving existing `\n`), and is applied to CLI output, TUI display, and `PromptManager` storage (`add_prompt`/`update_prompt`).
+- **Reason**: The user wants terminal/history output limited to readable line lengths, with the wrap point's space replaced by a line break, selectable at 80 or 120 per output.
+- **Considered**: Wrapping only terminal output (rejected — user wants stored/TUI too); reflowing paragraphs so width changes re-wrap existing entries (rejected — would destroy markdown/list structure); arbitrary widths (rejected — keep the choice to the requested 0/80/120).
+- **Tradeoff**: Because wrapped text is stored as-is, changing the width affects new/re-saved transcriptions only; existing entries keep their breaks. Unbreakable tokens longer than the width are left intact. DECISIONS.md now slightly exceeds the 200-line guide; split by topic next time it is touched.

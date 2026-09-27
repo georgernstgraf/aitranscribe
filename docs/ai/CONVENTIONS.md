@@ -29,7 +29,8 @@ Follow these without question. Do not deviate unless explicitly told.
 - Keep prompt summaries nullable in SQLite and migrate older `prompts` tables in place by adding `summary` instead of rebuilding the whole database when only that column is missing.
 
 ## UI Patterns
-- Wrap transcript and preview text to the actual panel width; do not reintroduce fixed-width wrapping like the removed 68-character limit.
+- Wrap preview text to the actual panel width; do not reintroduce hidden fixed-width limits. The only fixed-width wrapping is the explicit, user-controlled `OUTPUT_WIDTH` (`0`/`80`/`120`) applied through `wrap_text()` at output/storage boundaries.
+- `wrap_text(text, max_length=None)` owns all line wrapping. It defaults to the `OUTPUT_WIDTH` module global, treats `0` as off, and is line-preserving (only overlong lines are wrapped, existing `\n` survive), so it is idempotent. Never re-implement ad-hoc wrapping.
 - Use `Checkbox` for compact boolean settings in the sidebar instead of `Switch`, which rendered and behaved poorly in this layout.
 - Drive stored-transcription navigation with `OptionList`; the highlighted entry is the source of truth for transcript preview while the app is idle.
 - Keep the transcription list focused on mount so arrow keys work immediately when the app opens.

@@ -28,6 +28,7 @@ ProcessFileCallback = Callable[[str, dict[str, Any], FeedbackCallback, Transcrip
 GenerateSummaryCallback = Callable[[str, str], str | None]
 TranslateCallback = Callable[[str, str, str], str | None]
 BackfillSummariesCallback = Callable[[], int]
+WrapOutputCallback = Callable[[str, "int | None"], str]
 
 
 def get_clipboard_command(environ: Mapping[str, str | None] | None = None) -> list[str] | None:
@@ -431,6 +432,12 @@ class AitranscribeTUI(App[None]):
     .field_row Input {
         width: 1fr;
     }
+
+    .field_label {
+        height: 1;
+        color: #a8dadc;
+        padding-left: 1;
+    }
     """
 
     BINDINGS = [
@@ -456,6 +463,7 @@ class AitranscribeTUI(App[None]):
     PANE_FOCUS_WIDGET_IDS = {
         "source_modes",
         "preprocess_modes",
+        "output_width_modes",
         "file_path",
         "stt_model",
         "llm_model",
@@ -478,6 +486,7 @@ class AitranscribeTUI(App[None]):
         generate_summary: GenerateSummaryCallback | None = None,
         backfill_summaries: BackfillSummariesCallback | None = None,
         translate_text: TranslateCallback | None = None,
+        wrap_output: WrapOutputCallback | None = None,
     ) -> None:
         super().__init__()
         self.prompt_manager = prompt_manager
@@ -487,6 +496,7 @@ class AitranscribeTUI(App[None]):
         self.generate_summary = generate_summary
         self.backfill_summaries = backfill_summaries
         self.translate_text = translate_text
+        self.wrap_output = wrap_output
         self.stt_provider_name = stt_provider_name
         self.llm_provider_name = llm_provider_name
         self.default_stt_model = default_stt_model
@@ -498,6 +508,7 @@ class AitranscribeTUI(App[None]):
         self.input_source = str(self.initial_settings.get("input_source", "microphone"))
         self.pre_process_mode = str(self.initial_settings.get("pre_process_mode", "english"))
         self.verbose = bool(self.initial_settings.get("verbose", False))
+        self.output_width = int(self.initial_settings.get("output_width", 80))
         self.latest_transcript = "No transcript yet."
         self.history_prompts: list[dict[str, Any]] = []
         self.selected_history_id: int | None = None
@@ -604,6 +615,11 @@ class AitranscribeTUI(App[None]):
                     with Horizontal(classes="field_row"):
                         yield Label("LLM-Model")
                         yield PersistInput(value=self.default_llm_model, placeholder=f"{self.llm_provider_name} model", id="llm_model")
+                    yield Label("Output width", classes="field_label")
+                    with RadioSet(id="output_width_modes", compact=True):
+                        yield RadioButton("Off", id="width-off", value=self.output_width == 0)
+                        yield RadioButton("80", id="width-80", value=self.output_width == 80)
+                        yield RadioButton("120", id="width-120", value=self.output_width == 120)
         yield Footer()
 
     def on_mount(self) -> None:
@@ -638,6 +654,11 @@ class AitranscribeTUI(App[None]):
     def set_editor_text(self, text: str) -> None:
         self.get_transcript_editor().text = text
 
+    def apply_output_width(self, text: str) -> str:
+        if self.wrap_output is None:
+            return text
+        return self.wrap_output(text, self.output_width)
+
     def clear_history_selection(self) -> None:
         self.selected_history_id = None
         self.selected_history_text = None
@@ -660,7 +681,7 @@ class AitranscribeTUI(App[None]):
             self.refresh_transcript()
 
     def refresh_transcript(self) -> None:
-        self.set_editor_text(self.get_displayed_transcript())
+        self.set_editor_text(self.apply_output_width(self.get_displayed_transcript()))
 
     def refresh_feedback(self) -> None:
         lines = []
@@ -905,6 +926,7 @@ class AitranscribeTUI(App[None]):
             "stt_model": self.query_one("#stt_model", Input).value.strip() or self.default_stt_model,
             "llm_model": self.query_one("#llm_model", Input).value.strip() or self.default_llm_model,
             "verbose": self.verbose,
+            "output_width": self.output_width,
             "append_mode": self.append_mode,
         }
 
@@ -1046,6 +1068,7 @@ class AitranscribeTUI(App[None]):
             self.refresh_status()
             return
 
+        text = self.apply_output_width(text)
         if self.selected_history_id is not None:
             saved = self.prompt_manager.update_prompt(self.selected_history_id, text)
             if saved:
@@ -1187,7 +1210,7 @@ class AitranscribeTUI(App[None]):
         try:
             translated = self.translate_text(text, target_language, llm_model)
             if translated:
-                self.set_editor_text(translated)
+                self.set_editor_text(self.apply_output_width(translated))
                 self.set_status_message(f"Translated to {lang_name}.")
             else:
                 self.set_status_message("Translation failed.")
@@ -1217,6 +1240,12 @@ class AitranscribeTUI(App[None]):
         elif event.radio_set.id == "preprocess_modes" and event.pressed.id:
             self.pre_process_mode = event.pressed.id.removeprefix("mode-")
             self.persist_setting_value("pre_process_mode", self.pre_process_mode)
+            self.action_enter_command_mode()
+        elif event.radio_set.id == "output_width_modes" and event.pressed.id:
+            width = event.pressed.id.removeprefix("width-")
+            self.output_width = 0 if width == "off" else int(width)
+            self.persist_setting_value("output_width", self.output_width)
+            self.refresh_transcript()
             self.action_enter_command_mode()
 
     def on_input_changed(self, event: Input.Changed) -> None:

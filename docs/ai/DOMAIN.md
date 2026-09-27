@@ -28,3 +28,5 @@ Business rules and domain relationships not obvious from code.
 - Missing summaries should be backfilled only during TUI/default startup, and newly saved TUI transcriptions should get summaries asynchronously after the full transcript is already shown.
 - During live processing, the transcript pane should show raw transcription as soon as STT completes, then replace it with post-processed text once that stage finishes if post-processing is enabled.
 - Startup history previews should use the same truncation result as post-transcription refreshes; the app now achieves that by rebuilding the history list once more after the first layout pass.
+- Output line wrapping is a user setting (`OUTPUT_WIDTH`) with only three valid values: `0` (off), `80` (default), `120`. It applies to CLI terminal output, the TUI transcript, and the text stored in SQLite. `--width` overrides it for one run; the TUI Configuration radio persists it.
+- Wrapping replaces the space at the wrap point with a line break and never splits unbreakable tokens (URLs). Stored text keeps its wrapping, so changing `OUTPUT_WIDTH` only affects newly produced or re-saved transcriptions, not existing entries.

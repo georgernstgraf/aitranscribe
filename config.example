@@ -62,6 +62,9 @@ PRE_PROCESS_MODE="english"
 LAST_FILE_PATH=""
 VERBOSE_ERRORS="false"
 
+# Wrap output/transcript lines at 0 (off), 80, or 120 characters per line.
+OUTPUT_WIDTH="80"
+
 # =============================================================================
 # Prompt Storage
 # =============================================================================
