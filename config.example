@@ -15,7 +15,7 @@ GROQ_STT_MODEL="whisper-large-v3-turbo"
 # =============================================================================
 # LLM Post-Processing Provider
 # =============================================================================
-# Set LLM_PROVIDER to one of: openrouter, cohere, z.ai, google
+# Set LLM_PROVIDER to one of: openrouter, cohere, z.ai, google, cortecs
 # The corresponding API key and model must also be configured.
 
 LLM_PROVIDER="openrouter"
@@ -53,6 +53,14 @@ OPENROUTER_LLM_MODEL="anthropic/claude-3-haiku"
 # ---------------------------------------------------------------------------
 # GOOGLE_API_KEY="your_google_api_key_here"
 # GOOGLE_LLM_MODEL="gemini-2.0-flash"
+
+# ---------------------------------------------------------------------------
+# Cortecs (alternative provider)
+#   Endpoint: https://api.cortecs.ai/v1
+#   Docs:     https://docs.cortecs.ai/
+# ---------------------------------------------------------------------------
+# CORTECS_API_KEY="your_cortecs_api_key_here"
+# CORTECS_LLM_MODEL="qwen3.8-flash-next"
 
 # =============================================================================
 # TUI Defaults

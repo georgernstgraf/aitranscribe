@@ -54,6 +54,12 @@ LLM_PROVIDERS = {
         "env_model": "GROQ_LLM_MODEL",
         "default_model": "llama-3.3-70b-versatile",
     },
+    "cortecs": {
+        "base_url": "https://api.cortecs.ai/v1",
+        "env_key": "CORTECS_API_KEY",
+        "env_model": "CORTECS_LLM_MODEL",
+        "default_model": "qwen3.8-flash-next",
+    },
 }
 
 if os.name == 'nt':
@@ -89,6 +95,9 @@ def _create_default_config() -> None:
         f.write('\n# Google (alternative provider)\n')
         f.write('# GOOGLE_API_KEY="your_google_api_key_here"\n')
         f.write('# GOOGLE_LLM_MODEL="gemini-2.0-flash"\n')
+        f.write('\n# Cortecs (alternative provider)\n')
+        f.write('# CORTECS_API_KEY="your_cortecs_api_key_here"\n')
+        f.write('# CORTECS_LLM_MODEL="qwen3.8-flash-next"\n')
         f.write('\n# TUI Defaults\n')
         f.write('PRE_PROCESS_MODE="english"\n')
         f.write('LAST_FILE_PATH=""\n')
@@ -105,6 +114,7 @@ _MIGRATION_BLOCKS: list[tuple[str, str]] = [
     ("COHERE_API_KEY", '\n# Cohere (alternative provider)\n# COHERE_API_KEY="your_cohere_api_key_here"\n# COHERE_LLM_MODEL="command-r"\n'),
     ("ZAI_API_KEY", '\n# z.ai (alternative provider)\n# ZAI_API_KEY="your_zai_api_key_here"\n# ZAI_LLM_MODEL="glm-5"\n'),
     ("GOOGLE_API_KEY", '\n# Google (alternative provider)\n# GOOGLE_API_KEY="your_google_api_key_here"\n# GOOGLE_LLM_MODEL="gemini-2.0-flash"\n'),
+    ("CORTECS_API_KEY", '\n# Cortecs (alternative provider)\n# CORTECS_API_KEY="your_cortecs_api_key_here"\n# CORTECS_LLM_MODEL="qwen3.8-flash-next"\n'),
     ("PRE_PROCESS_MODE", '\n# TUI Defaults\nPRE_PROCESS_MODE="english"\n'),
     ("LAST_FILE_PATH", 'LAST_FILE_PATH=""\n'),
     ("VERBOSE_ERRORS", 'VERBOSE_ERRORS="false"\n'),

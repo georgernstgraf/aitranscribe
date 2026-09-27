@@ -126,6 +126,7 @@ Currently only Groq is supported. Set `GROQ_API_KEY` and optionally `GROQ_STT_MO
 | Cohere | `cohere` | `COHERE_API_KEY` | `command-r` |
 | z.ai | `z.ai` | `ZAI_API_KEY` | `glm-5` |
 | Google (Gemini) | `google` | `GOOGLE_API_KEY` | `gemini-2.0-flash` |
+| Cortecs | `cortecs` | `CORTECS_API_KEY` | `qwen3.8-flash-next` |
 
 Each provider has a corresponding `*_LLM_MODEL` environment variable to override the default.
 

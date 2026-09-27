@@ -204,3 +204,9 @@ Each entry documents WHAT was decided and WHY.
 - **Reason**: The user wants terminal/history output limited to readable line lengths, with the wrap point's space replaced by a line break, selectable at 80 or 120 per output.
 - **Considered**: Wrapping only terminal output (rejected — user wants stored/TUI too); reflowing paragraphs so width changes re-wrap existing entries (rejected — would destroy markdown/list structure); arbitrary widths (rejected — keep the choice to the requested 0/80/120).
 - **Tradeoff**: Because wrapped text is stored as-is, changing the width affects new/re-saved transcriptions only; existing entries keep their breaks. Unbreakable tokens longer than the width are left intact. DECISIONS.md now slightly exceeds the 200-line guide; split by topic next time it is touched.
+
+## 2026-09-27: Add Cortecs As An LLM Provider
+- **Choice**: Add a `cortecs` entry to `main.py`'s `LLM_PROVIDERS` (`base_url` `https://api.cortecs.ai/v1`, key `CORTECS_API_KEY`, model `CORTECS_LLM_MODEL`, default `qwen3.8-flash-next`), mirror it in `_create_default_config()`/`_MIGRATION_BLOCKS`/`config.example`/README, and switch the active `~/.config/aitranscribe/aitranscribe.conf` to `LLM_PROVIDER="cortecs"`.
+- **Reason**: The user's opencode install already authenticates against Cortecs; making it a first-class provider keeps parity with the existing OpenAI-compatible providers instead of hacking the active config.
+- **Considered**: Reusing an existing provider slot (rejected — wrong endpoint/model namespace); config-only change (rejected — `cortecs` was not a known provider and would fall back to openrouter).
+- **Tradeoff**: The Cortecs API key is a long-lived JWT copied from `~/.local/share/opencode/auth.json`; it must be rotated manually if it expires.
