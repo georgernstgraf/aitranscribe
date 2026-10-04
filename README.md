@@ -64,6 +64,7 @@ The terminal UI is built with [Textual](https://textual.textualize.io/) and divi
 | Key | Action |
 |---|---|
 | `Space` | Start / stop microphone recording |
+| `P` | Pause / resume an active microphone recording |
 | `A` | Append new recording to the currently selected transcription |
 | `Ctrl+S` | Save the editor contents as a new transcription |
 | `C` | Copy transcript to clipboard (X11, Wayland, macOS, Windows, or OSC 52) |
@@ -71,12 +72,12 @@ The terminal UI is built with [Textual](https://textual.textualize.io/) and divi
 | `E` | Translate transcript to English via LLM |
 | `W` | Write the selected transcription to `/tmp/issue.md` |
 | `Delete` | Delete the selected transcription from the list |
-| `Escape` | Enter command mode (unfocus all widgets) |
+| `Escape` | Cancel the active recording (discards the dictated audio); otherwise enter command mode (unfocus all widgets) |
 | `Q` | Quit |
 
 ### Recording modes
 
-- **Microphone**: press Space to start, Space again to stop. Audio is compressed to 32 kbps MP3 before sending.
+- **Microphone**: press Space to start, Space again to stop. Press `P` to pause and resume without ending the session; only the audio recorded between pauses is transcribed. Press `Escape` to cancel and discard the recording. Audio is compressed to 32 kbps MP3 before sending.
 - **Filesystem file**: enter a file path in the File field and press Enter. Large files are automatically chunked (25 MB or 10-minute segments) to stay within API limits.
 
 ### Pre-processing modes

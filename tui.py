@@ -150,14 +150,16 @@ class RecordingController:
         self._chunks: list[np.ndarray] = []
         self._stream: sd.InputStream | None = None
         self.is_recording = False
+        self.paused = False
 
     def _callback(self, indata: np.ndarray, frames: int, cb_time: Any, status: Any) -> None:
         del frames, cb_time, status
-        if self.is_recording:
+        if self.is_recording and not self.paused:
             self._chunks.append(indata.copy())
 
     def start(self) -> None:
         self._chunks = []
+        self.paused = False
         self._stream = _get_sd().InputStream(
             samplerate=self.samplerate,
             channels=self.channels,
@@ -166,8 +168,15 @@ class RecordingController:
         self._stream.start()
         self.is_recording = True
 
+    def pause(self) -> None:
+        self.paused = True
+
+    def resume(self) -> None:
+        self.paused = False
+
     def stop(self) -> np.ndarray | None:
         self.is_recording = False
+        self.paused = False
         if self._stream is not None:
             self._stream.stop()
             self._stream.close()
@@ -442,6 +451,7 @@ class AitranscribeTUI(App[None]):
 
     BINDINGS = [
         Binding("space", "toggle_recording", "Record / Stop", priority=True),
+        Binding("p", "toggle_pause", "Pause / Resume"),
         Binding("a", "append_recording", "Append Recording"),
         Binding("ctrl+s", "save_transcript", "Save Transcript"),
         Binding("c", "copy_transcript", "Copy Transcript"),
@@ -449,7 +459,7 @@ class AitranscribeTUI(App[None]):
         Binding("e", "translate_to_english", "→ English"),
         Binding("w", "write_issue", "Write Issue File"),
         Binding("delete", "delete_selected_transcription", "Delete Selected"),
-        Binding("escape", "enter_command_mode", "Command Mode"),
+        Binding("escape", "escape_key", "Cancel / Command Mode"),
         Binding("q", "quit", "Quit"),
     ]
 
@@ -504,6 +514,7 @@ class AitranscribeTUI(App[None]):
         self.initial_settings = initial_settings or {}
         self.recorder = RecordingController()
         self.is_recording = False
+        self.is_paused = False
         self.is_processing = False
         self.input_source = str(self.initial_settings.get("input_source", "microphone"))
         self.pre_process_mode = str(self.initial_settings.get("pre_process_mode", "english"))
@@ -534,8 +545,8 @@ class AitranscribeTUI(App[None]):
     def current_activity_label(self) -> str:
         if self.is_recording:
             if self.append_mode:
-                return "Appending"
-            return "Recording"
+                return "Appending (paused)" if self.is_paused else "Appending"
+            return "Recording (paused)" if self.is_paused else "Recording"
         if self.is_processing:
             if self.append_mode:
                 return "Appending"
@@ -550,7 +561,10 @@ class AitranscribeTUI(App[None]):
         mode_label = self.current_mode_label()
         activity_label = self.current_activity_label()
         if self.is_recording:
-            activity_label = f"{activity_label}: Press Space to Finish"
+            if self.is_paused:
+                activity_label = f"{activity_label}: Press P to Resume, Space to Finish"
+            else:
+                activity_label = f"{activity_label}: Press P to Pause, Space to Finish"
         return f"{mode_label} | {activity_label}"
 
     def set_flash_message(self, message: str) -> None:
@@ -795,6 +809,41 @@ class AitranscribeTUI(App[None]):
             self.set_idle_status()
         self.refresh_status()
 
+    def action_escape_key(self) -> None:
+        if self.is_recording:
+            self.cancel_recording()
+        else:
+            self.action_enter_command_mode()
+
+    def cancel_recording(self) -> None:
+        """Abort an active recording and discard the captured audio."""
+        self.recorder.stop()
+        self.is_recording = False
+        self.is_paused = False
+        self.cancel_append_mode()
+        self.screen.set_focus(None)
+        self.latest_transcript = "No transcript yet."
+        self.raw_transcript = None
+        self.latest_file_path = None
+        self.reset_feedback()
+        self.set_idle_status()
+        self.set_status_message("Recording cancelled. Dictation discarded.")
+        self.refresh_transcript()
+        self.refresh_status()
+
+    def action_toggle_pause(self) -> None:
+        if not self.is_recording:
+            return
+
+        self.is_paused = not self.is_paused
+        if self.is_paused:
+            self.recorder.pause()
+            self.set_status_message("Recording paused.")
+        else:
+            self.recorder.resume()
+            self.set_status_message("Recording resumed.")
+        self.refresh_status()
+
     def watch_focus(self, old_focus: Any, new_focus: Any) -> None:
         del old_focus, new_focus
         if self.is_mounted:
@@ -863,6 +912,7 @@ class AitranscribeTUI(App[None]):
             return
 
         self.is_recording = True
+        self.is_paused = False
         if not self.append_mode:
             self.clear_history_selection()
         self.latest_file_path = None
@@ -879,6 +929,7 @@ class AitranscribeTUI(App[None]):
     def finish_recording(self) -> None:
         audio = self.recorder.stop()
         self.is_recording = False
+        self.is_paused = False
         if audio is None or len(audio) == 0:
             self.cancel_append_mode()
             self.latest_transcript = "No audio recorded."

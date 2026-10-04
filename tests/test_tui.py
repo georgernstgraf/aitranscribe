@@ -9,7 +9,9 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from tui import AitranscribeTUI, build_osc52_sequence, copy_text_to_clipboard, copy_text_with_osc52, get_clipboard_command
+import numpy as np
+
+from tui import AitranscribeTUI, RecordingController, build_osc52_sequence, copy_text_to_clipboard, copy_text_with_osc52, get_clipboard_command
 from textual.containers import Vertical
 from textual.widgets import Input, OptionList, Static, TextArea
 
@@ -357,7 +359,7 @@ async def test_recording_status_overrides_command_mode_idle_message():
         app.refresh_status()
         state_text = str(app.query_one("#state_status", Static).render())
 
-    assert state_text == "Pane Focus Mode | Recording: Press Space to Finish"
+    assert state_text == "Pane Focus Mode | Recording: Press P to Pause, Space to Finish"
 
 
 @pytest.mark.anyio
@@ -1305,3 +1307,175 @@ async def test_apply_summary_to_history_ignores_unknown_prompt_id():
 
         history_list = app.query_one("#history_list", OptionList)
         assert "Orphan summary" not in str(history_list.get_option("history-7").prompt)
+
+
+def test_recording_controller_pause_discards_frames():
+    controller = RecordingController()
+    controller.is_recording = True
+
+    controller.pause()
+    controller._callback(np.zeros((10, 1), dtype=np.float32), 10, None, None)
+    assert controller._chunks == []
+
+    controller.resume()
+    controller._callback(np.ones((10, 1), dtype=np.float32), 10, None, None)
+    assert len(controller._chunks) == 1
+
+
+def test_toggle_pause_ignored_when_not_recording():
+    app = AitranscribeTUI(
+        prompt_manager=Mock(),
+        process_audio=Mock(),
+        process_file=Mock(),
+        stt_provider_name="Groq",
+        llm_provider_name="openrouter",
+        default_stt_model="whisper",
+        default_llm_model="gpt",
+        initial_settings={"pre_process_mode": "english", "input_source": "microphone"},
+    )
+
+    app.action_toggle_pause()
+
+    assert app.is_paused is False
+    assert app.recorder.paused is False
+
+
+@pytest.mark.anyio
+async def test_toggle_pause_marks_recording_paused_and_resumes():
+    prompt_manager = Mock()
+    prompt_manager.count_prompts.return_value = 0
+    prompt_manager.recent_prompts.return_value = []
+
+    app = AitranscribeTUI(
+        prompt_manager=prompt_manager,
+        process_audio=Mock(),
+        process_file=Mock(),
+        stt_provider_name="Groq",
+        llm_provider_name="openrouter",
+        default_stt_model="whisper",
+        default_llm_model="gpt",
+        initial_settings={"pre_process_mode": "english", "input_source": "microphone"},
+    )
+
+    async with app.run_test():
+        app.is_recording = True
+
+        app.action_toggle_pause()
+        assert app.is_paused is True
+        assert app.recorder.paused is True
+        state_text = str(app.query_one("#state_status", Static).render())
+        flash_text = str(app.query_one("#flash_status", Static).render())
+        assert state_text == "Command Mode | Recording (paused): Press P to Resume, Space to Finish"
+        assert flash_text == "Recording paused."
+
+        app.action_toggle_pause()
+        assert app.is_paused is False
+        assert app.recorder.paused is False
+        state_text = str(app.query_one("#state_status", Static).render())
+        flash_text = str(app.query_one("#flash_status", Static).render())
+        assert state_text == "Command Mode | Recording: Press P to Pause, Space to Finish"
+        assert flash_text == "Recording resumed."
+
+
+@pytest.mark.anyio
+async def test_escape_cancels_active_recording_and_discards_text():
+    prompt_manager = Mock()
+    prompt_manager.count_prompts.return_value = 0
+    prompt_manager.recent_prompts.return_value = []
+
+    app = AitranscribeTUI(
+        prompt_manager=prompt_manager,
+        process_audio=Mock(),
+        process_file=Mock(),
+        stt_provider_name="Groq",
+        llm_provider_name="openrouter",
+        default_stt_model="whisper",
+        default_llm_model="gpt",
+        initial_settings={"pre_process_mode": "english", "input_source": "microphone"},
+    )
+
+    async with app.run_test():
+        app.is_recording = True
+        app.is_paused = True
+        app.latest_transcript = "Recording in progress..."
+        app.raw_transcript = "partial"
+
+        with patch.object(app.recorder, "stop") as mock_stop:
+            app.action_escape_key()
+
+        mock_stop.assert_called_once()
+        assert app.is_recording is False
+        assert app.is_paused is False
+        assert app.latest_transcript == "No transcript yet."
+        assert app.raw_transcript is None
+        flash_text = str(app.query_one("#flash_status", Static).render())
+        assert flash_text == "Recording cancelled. Dictation discarded."
+
+
+@pytest.mark.anyio
+async def test_escape_cancel_in_append_mode_keeps_selected_transcript():
+    prompt_manager = Mock()
+    prompt_manager.count_prompts.return_value = 1
+    prompt_manager.recent_prompts.return_value = [
+        {"id": 7, "prompt": "Base transcript", "filename": "a.mp3", "timestamp": "2026-03-09T11:00:00", "summary": None},
+    ]
+
+    app = AitranscribeTUI(
+        prompt_manager=prompt_manager,
+        process_audio=Mock(),
+        process_file=Mock(),
+        stt_provider_name="Groq",
+        llm_provider_name="openrouter",
+        default_stt_model="whisper",
+        default_llm_model="gpt",
+        initial_settings={"pre_process_mode": "english", "input_source": "microphone"},
+    )
+
+    async with app.run_test():
+        app.is_recording = True
+        app.append_mode = True
+        app.append_target_id = 7
+        app.append_base_text = "Base transcript"
+        app.selected_history_id = 7
+        app.selected_history_text = "Base transcript"
+
+        app.action_escape_key()
+
+        assert app.is_recording is False
+        assert app.append_mode is False
+        assert app.append_target_id is None
+        assert app.append_base_text == ""
+        assert app.selected_history_id == 7
+        assert app.get_displayed_transcript() == "Base transcript"
+
+
+@pytest.mark.anyio
+async def test_escape_without_recording_returns_to_command_mode():
+    prompt_manager = Mock()
+    prompt_manager.count_prompts.return_value = 1
+    prompt_manager.recent_prompts.return_value = [
+        {"id": 7, "prompt": "Stored transcript", "filename": "a.mp3", "timestamp": "2026-03-09T11:00:00", "summary": None},
+    ]
+
+    app = AitranscribeTUI(
+        prompt_manager=prompt_manager,
+        process_audio=Mock(),
+        process_file=Mock(),
+        stt_provider_name="Groq",
+        llm_provider_name="openrouter",
+        default_stt_model="whisper",
+        default_llm_model="gpt",
+        initial_settings={"pre_process_mode": "english", "input_source": "microphone"},
+    )
+
+    async with app.run_test() as pilot:
+        app.set_focus(app.query_one("#history_list", OptionList))
+        await pilot.pause()
+        assert app.is_pane_focus_mode() is True
+
+        app.action_escape_key()
+        await pilot.pause()
+
+        assert app.is_command_mode() is True
+        state_text = str(app.query_one("#state_status", Static).render())
+        assert state_text == "Command Mode | Ready"

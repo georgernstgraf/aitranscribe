@@ -210,3 +210,16 @@ Each entry documents WHAT was decided and WHY.
 - **Reason**: The user's opencode install already authenticates against Cortecs; making it a first-class provider keeps parity with the existing OpenAI-compatible providers instead of hacking the active config.
 - **Considered**: Reusing an existing provider slot (rejected — wrong endpoint/model namespace); config-only change (rejected — `cortecs` was not a known provider and would fall back to openrouter).
 - **Tradeoff**: The Cortecs API key is a long-lived JWT copied from `~/.local/share/opencode/auth.json`; it must be rotated manually if it expires.
+
+## 2026-10-04: Escape Cancels An Active TUI Recording And Discards Its Audio
+- **Choice**: In the TUI, `Escape` now aborts an in-progress microphone recording (`cancel_recording()`), stopping the stream and discarding the captured audio; when not recording it keeps the old behavior of returning to Command Mode. Canonical command hotkeys (`P`/`A`/`C`/`D`/`E`/`W`) remain Command-Mode-only.
+- **Reason**: Users expect `Escape` to mean "abort", but it previously just unfocused widgets and left the recording running. There is no partial transcript yet at that point, so the whole take is discarded.
+- **Considered**: Keeping `Escape` as pure mode-return and adding a separate cancel key; prompting for confirmation before discarding.
+- **Tradeoff**: While recording, `Escape` can no longer be used just to leave Pane Focus Mode — the user must finish with `Space` or accept the cancel. Append mode only discards the new take; the selected saved transcript stays intact.
+
+## 2026-10-04: P Toggles Pause/Resume During TUI Recording
+- **Choice**: A new `P` binding pauses/resumes an active microphone recording. `RecordingController` keeps the sounddevice stream open and simply stops appending frames while `paused`; `Space` still finishes the take and only non-paused audio is transcribed. The state label shows `Recording (paused): Press P to Resume, Space to Finish`.
+- **Reason**: Users dictating long texts need to stop mid-thought without ending the session or polluting the transcript.
+- **Considered**: Closing/reopening the audio stream on pause (slower resume, re-open failure risk); leaving the transcript pane to show a pause placeholder (would hide the append base).
+- **Tradeoff**: The OS microphone indicator stays active during pause because the stream is still open. `P` is a Command-Mode hotkey like the other letters; while a pane is focused the character is typed into that widget instead.
+
