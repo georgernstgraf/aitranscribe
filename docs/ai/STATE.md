@@ -1,5 +1,10 @@
 # Project State
 
+2026-10-08: #81 shipped the polished-recognition crafted system prompt as the
+default (`[post_process.system]`), with a two-generation legacy upgrade chain
+in `_upgrade_legacy_prompt_defaults` (pre-#73 and #73..#80 keyboard-era files
+upgrade automatically; customized values untouched). Tests 196 passed.
+
 Current status as of 2026-10-04.
 
 ## Current Focus

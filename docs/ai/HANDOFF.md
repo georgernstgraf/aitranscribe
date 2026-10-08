@@ -1,5 +1,19 @@
 # Handoff
 
+## 2026-10-08 session: crafted system prompt adopted (#81)
+- `_DEFAULT_PROMPTS_TOML` `[post_process.system]` = the polished-recognition
+  #112 crafted prompt (prompts.json, v1.3.5), adapted to desktop (no
+  "smartphone user"), injection guard line kept.
+- `_upgrade_legacy_prompt_defaults` now chains TWO generations: gen 1
+  (pre-#73, soft translate + pre-guard system) and gen 2 (#73..#80,
+  hardened translate + keyboard-era system, new constant
+  `_LEGACY_POST_PROCESS_SYSTEM`). Pristine files of either generation are
+  rewritten from the template; partially customized files get the system
+  prompt patched in memory.
+- Tests 196 passed (3 new: crafted markers, keyboard-era rewrite,
+  keyboard-era in-memory upgrade). Commit c55f441. Sub-issue of
+  polished-recognition#115.
+
 No pending implementation tasks. 2026-10-04 session added Escape-cancel and
 P pause/resume to the TUI recording workflow.
 
