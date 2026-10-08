@@ -51,7 +51,9 @@ try:
         PromptManager,
         _DEFAULT_PROMPTS_TOML,
         _LEGACY_POST_PROCESS_TRANSLATE,
+        _LEGACY_POST_PROCESS_SYSTEM,
         _INJECTION_GUARD_LINE,
+        _legacy_post_process_system_prompt,
         _load_prompts,
         _upgrade_legacy_prompt_defaults,
     )
@@ -227,7 +229,7 @@ def test_build_post_process_messages_cleanup_only():
     assert messages[0]["role"] == "system"
     assert messages[1]["role"] == "user"
     assert messages[1]["content"] == "Hello world"
-    assert "Clean up the transcription" in messages[0]["content"]
+    assert "Please clean up the transcription" in messages[0]["content"]
     assert "Return only the cleaned-up transcription." in messages[0]["content"]
     assert "{{target_language_clause}}" not in messages[0]["content"]
     assert "{{source_language_clause}}" not in messages[0]["content"]
@@ -240,7 +242,7 @@ def test_build_post_process_messages_with_translate():
     messages = build_post_process_messages("Hallo Welt", target_language="English")
     assert len(messages) == 2
     assert messages[1]["content"] == "Hallo Welt"
-    assert "Clean up the transcription" in messages[0]["content"]
+    assert "Please clean up the transcription" in messages[0]["content"]
     assert "IMPORTANT: Write your output in English, regardless of the language of the transcription." in messages[0]["content"]
     assert "{{target_language_clause}}" not in messages[0]["content"]
 
@@ -269,16 +271,27 @@ def test_build_post_process_messages_collapses_blank_lines():
 
 
 def _legacy_prompts_toml() -> str:
-    """Reconstruct the pre-#73 default prompts file (soft translate clause, no guard)."""
-    text = _DEFAULT_PROMPTS_TOML.replace(
+    """Reconstruct the pre-#73 default prompts file (soft translate clause, pre-guard system)."""
+    import tomllib
+    new_system = tomllib.loads(_DEFAULT_PROMPTS_TOML)["post_process"]["system"]["prompt"]
+    text = _DEFAULT_PROMPTS_TOML.replace(new_system, _legacy_post_process_system_prompt())
+    assert _legacy_post_process_system_prompt() in text
+    assert "Please clean up the transcription" not in text
+    text = text.replace(
         '"IMPORTANT: Write your output in {{target_language}}, '
         'regardless of the language of the transcription."',
         '"' + _LEGACY_POST_PROCESS_TRANSLATE + '"',
     )
     assert _LEGACY_POST_PROCESS_TRANSLATE in text
-    text = text.replace(_INJECTION_GUARD_LINE + "\n", "")
     assert _INJECTION_GUARD_LINE not in text
     return text
+
+
+def _keyboard_era_prompts_toml() -> str:
+    """Reconstruct the #73..#80 default prompts file (hardened translate, keyboard system prompt)."""
+    import tomllib
+    new_system = tomllib.loads(_DEFAULT_PROMPTS_TOML)["post_process"]["system"]["prompt"]
+    return _DEFAULT_PROMPTS_TOML.replace(new_system, _LEGACY_POST_PROCESS_SYSTEM)
 
 
 def test_default_translate_clause_is_hardened():
@@ -296,6 +309,18 @@ def test_default_system_prompt_has_injection_guard():
     import tomllib
     data = tomllib.loads(_DEFAULT_PROMPTS_TOML)
     assert _INJECTION_GUARD_LINE in data["post_process"]["system"]["prompt"]
+
+
+def test_default_system_prompt_is_the_crafted_version():
+    """The embedded default is the polished-recognition #112 crafted prompt (aitranscribe #81)."""
+    import tomllib
+    data = tomllib.loads(_DEFAULT_PROMPTS_TOML)
+    prompt = data["post_process"]["system"]["prompt"]
+    assert "Please clean up the transcription:" in prompt
+    assert "Your output may equal the input." in prompt
+    assert "using markdown sparingly where appropriate" in prompt
+    assert "especially greetings at the end of the message" in prompt
+    assert "a speech-to-text engine (whisper) transcribed the audio" in prompt
 
 
 def test_load_prompts_rewrites_pristine_legacy_file(monkeypatch, tmp_path):
@@ -339,6 +364,35 @@ def test_load_prompts_current_file_untouched(monkeypatch, tmp_path):
     data = _load_prompts()
     assert prompts_file.read_text() == _DEFAULT_PROMPTS_TOML
     assert _upgrade_legacy_prompt_defaults(data) == []
+
+
+def test_load_prompts_rewrites_keyboard_era_pristine_file(monkeypatch, tmp_path):
+    """A pristine #73..#80 prompts.toml (hardened translate, keyboard system) is refreshed (#81)."""
+    import main
+    prompts_file = tmp_path / "prompts.toml"
+    prompts_file.write_text(_keyboard_era_prompts_toml())
+    monkeypatch.setattr(main, "PROMPTS_CONFIG", prompts_file)
+    monkeypatch.setattr(main, "CONFIG_DIR", tmp_path)
+    data = _load_prompts()
+    assert prompts_file.read_text() == _DEFAULT_PROMPTS_TOML
+    assert "Your output may equal the input." in data["post_process"]["system"]["prompt"]
+
+
+def test_load_prompts_upgrades_keyboard_era_system_in_memory(monkeypatch, tmp_path):
+    """A customized #73..#80 file keeps customizations; the keyboard system prompt upgrades (#81)."""
+    import main
+    legacy = _keyboard_era_prompts_toml().replace(
+        "Create a concise summary of the transcription in 70 to 80 characters.",
+        "Summarize briefly, my way.",
+    )
+    prompts_file = tmp_path / "prompts.toml"
+    prompts_file.write_text(legacy)
+    monkeypatch.setattr(main, "PROMPTS_CONFIG", prompts_file)
+    monkeypatch.setattr(main, "CONFIG_DIR", tmp_path)
+    data = _load_prompts()
+    assert prompts_file.read_text() == legacy
+    assert "Your output may equal the input." in data["post_process"]["system"]["prompt"]
+    assert "Summarize briefly, my way." in data["summary"]["user"]["template"]
 
 
 def test_build_summary_messages():
