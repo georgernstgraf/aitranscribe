@@ -1,5 +1,22 @@
 # Handoff
 
+## 2026-10-18 session: Groq long-upload umlaut fix (words[] + 120 s cap)
+- Root cause: Groq mangles `text`/`segments[].text` for uploads > ~120 s — each
+  word loses everything from its first non-ASCII character on ("würde" -> "w",
+  "natürlich" -> "nat", "ähnliches" -> gone). `words[]` stays correct; uploads
+  <= 120 s are unaffected. The sister project uploads ~21 s fragments, hence no
+  symptoms there. Repro + evidence in `docs/ai/PITFALLS.md` (2026-10-18 entry).
+- Fix: `core.transcribe_audio` rebuilds the transcript from `words[]`
+  (`timestamp_granularities=["word"]`, `text` fallback, one retry without the
+  parameter on `BadRequestError`); `core.chunk_audio` default ceiling is now
+  `GROQ_MAX_UPLOAD_S = 120` with cut points snapped into silencedetect pauses
+  and passed as `-segment_times`; `main.process_recorded_audio_for_tui` passes
+  `do_chunk=True`.
+- Tests 207 passed (`PYNPUT_BACKEND=dummy ./venv/bin/pytest -q`).
+- Verified live against Groq with the previously mangled recordings v166/v189
+  and the chunked 394 s v188 (pause-aligned seams). No pending implementation
+  tasks.
+
 ## 2026-10-08 session: crafted system prompt adopted (#81)
 - `_DEFAULT_PROMPTS_TOML` `[post_process.system]` = the polished-recognition
   #112 crafted prompt (prompts.json, v1.3.5), adapted to desktop (no
