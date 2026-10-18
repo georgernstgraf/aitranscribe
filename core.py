@@ -1,10 +1,30 @@
 import math
 import os
+import re
 import subprocess
 from pathlib import Path
-from openai import OpenAI
+from openai import BadRequestError, OpenAI
 
 MAX_AUDIO_SIZE_MB = 25
+
+# Groq assembles the transcript of long uploads incorrectly: from the first
+# non-ASCII character of a word it drops the rest of that span, so German
+# umlaut words come back cut ("würde" -> "w", "natürlich" -> "nat", "möchte"
+# -> "m") and whole spans can disappear. The `words[]` array stays correct and
+# uploads at or below ~120 s are unaffected. Measured 2026-10-18: <=120 s clean,
+# >=122 s mangled, both whisper-large-v3 and -turbo, no request parameter avoids
+# it. Two defences: cap uploads here and rebuild the text from `words[]` in
+# transcribe_audio(). See docs/ai/PITFALLS.md.
+GROQ_MAX_UPLOAD_S = 120
+
+# Chunk cut points are snapped into detected pauses: a cut inside a word makes
+# Whisper emit that word's fragment, which is the same visible damage as the
+# Groq bug above.
+_SILENCE_NOISE_DB = 35
+_SILENCE_MIN_S = 0.25
+_SILENCE_SNAP_MAX_S = 30.0
+_SILENCE_START_RE = re.compile(r"silence_start:\s*(-?[\d.]+)")
+_SILENCE_END_RE = re.compile(r"silence_end:\s*(-?[\d.]+)")
 
 
 def _ffmpeg(*args: str) -> None:
@@ -59,15 +79,75 @@ def compress_audio(file_path: str, output_path: str | None = None) -> str:
     return output_path
 
 
-def chunk_audio(file_path: str, max_size_mb: int = MAX_AUDIO_SIZE_MB, max_duration_s: int = 600) -> list[str]:
+def _parse_silence_midpoints(stderr: str) -> list[float]:
+    """Midpoints (seconds) of the silence intervals in ffmpeg silencedetect output."""
+    midpoints: list[float] = []
+    pending_start: float | None = None
+    for line in stderr.splitlines():
+        start_match = _SILENCE_START_RE.search(line)
+        if start_match:
+            pending_start = float(start_match.group(1))
+            continue
+        end_match = _SILENCE_END_RE.search(line)
+        if end_match and pending_start is not None:
+            midpoints.append((pending_start + float(end_match.group(1))) / 2)
+            pending_start = None
+    return midpoints
+
+
+def _silence_midpoints(file_path: str) -> list[float]:
+    """Silence midpoints via ffmpeg silencedetect, [] when detection is unavailable.
+
+    Best-effort by design: an unreadable file, a missing ffmpeg or an stderr
+    without silence markers only costs cut quality (nominal cut points), never
+    the chunking itself.
+    """
+    cmd = [
+        "ffmpeg", "-hide_banner", "-nostats", "-i", file_path, "-vn",
+        "-af", f"silencedetect=noise=-{_SILENCE_NOISE_DB}dB:d={_SILENCE_MIN_S}",
+        "-f", "null", "-",
+    ]
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True)
+    except FileNotFoundError:
+        return []
+    return _parse_silence_midpoints(result.stderr)
+
+
+def _snap_cut_points(duration: float, segment_time: int, midpoints: list[float]) -> list[int]:
+    """Cut points every `segment_time` seconds, moved into the nearest pause.
+
+    Each nominal cut point is moved to the closest silence midpoint within
+    ``min(_SILENCE_SNAP_MAX_S, 35% of segment_time)``; without a nearby
+    midpoint the nominal position is kept. The result is strictly increasing
+    and inside the file, so `ffmpeg -f segment -segment_times` gets valid input.
+    """
+    margin = min(_SILENCE_SNAP_MAX_S, segment_time * 0.35)
+    cuts: list[int] = []
+    for index in range(1, math.ceil(duration / segment_time)):
+        nominal = index * segment_time
+        previous = cuts[-1] if cuts else 0
+        candidates = [
+            point
+            for point in midpoints
+            if previous + 1 < point < duration and abs(point - nominal) <= margin
+        ]
+        nearest = min(candidates, key=lambda point: abs(point - nominal)) if candidates else nominal
+        cuts.append(int(round(nearest)))
+    return cuts
+
+
+def chunk_audio(file_path: str, max_size_mb: int = MAX_AUDIO_SIZE_MB, max_duration_s: int = GROQ_MAX_UPLOAD_S) -> list[str]:
     """Split audio into chunks sized to stay under max_size_mb and max_duration_s.
 
     Segment length is the smaller of the size-derived value (from the file's
     bitrate, with a 5% margin for keyframe-aligned cut points) and the
-    duration-derived value (even split so every chunk is within max_duration_s).
-    Files already within both limits are returned unsplit. A file that is
-    small but long (e.g. a 43-minute Zoom recording under 25 MB) is still
-    split, because STT backends truncate very long single uploads.
+    duration-derived value (even split so every chunk is within max_duration_s,
+    which defaults to the Groq upload ceiling). Cut points are snapped into
+    detected pauses so a seam cannot split a word. Files already within both
+    limits are returned unsplit. A file that is small but long (e.g. a
+    43-minute Zoom recording under 25 MB) is still split, because STT backends
+    truncate very long single uploads.
     """
     file_size_mb = os.path.getsize(file_path) / (1024 * 1024)
     try:
@@ -94,7 +174,15 @@ def chunk_audio(file_path: str, max_size_mb: int = MAX_AUDIO_SIZE_MB, max_durati
     output_dir = Path(file_path).parent
     out_pattern = str(output_dir / f"{file_name}_chunk%01d{file_ext}")
 
-    _ffmpeg("-i", file_path, "-f", "segment", "-segment_time", str(segment_time), "-c", "copy", out_pattern)
+    cut_points = _snap_cut_points(duration, segment_time, _silence_midpoints(file_path))
+    if cut_points:
+        segment_args = ("-segment_times", ",".join(str(cut) for cut in cut_points))
+    else:
+        # No cut point fits (e.g. a file over the size limit but shorter than the
+        # segment floor): keep the classic single cut, which ffmpeg answers with
+        # one chunk.
+        segment_args = ("-segment_time", str(segment_time))
+    _ffmpeg("-i", file_path, "-f", "segment", *segment_args, "-c", "copy", out_pattern)
 
     chunks: list[str] = []
     i = 0
@@ -112,17 +200,34 @@ def chunk_audio(file_path: str, max_size_mb: int = MAX_AUDIO_SIZE_MB, max_durati
     return chunks
 
 def transcribe_audio(client: OpenAI, file_path: str, stt_model: str) -> tuple[str, str | None]:
-    """Transcribes a single audio file, returning (text, detected_language)."""
+    """Transcribes a single audio file, returning (text, detected_language).
+
+    The transcript is rebuilt from the word-level timestamps when the service
+    returns them: on uploads longer than ~120 s Groq drops everything from a
+    word's first non-ASCII character onwards in `text`/`segments[].text`, while
+    `words[]` stays correct — see docs/ai/PITFALLS.md. Without word timestamps
+    (models that reject the parameter) the plain `text` is used; the
+    GROQ_MAX_UPLOAD_S upload cap keeps that path correct too.
+    """
     if not os.path.isfile(file_path):
         raise FileNotFoundError(f"Audio file not found: {file_path}")
     with open(file_path, "rb") as audio_file:
-        transcript = client.audio.transcriptions.create(
-            model=stt_model,
-            file=audio_file,
-            response_format="verbose_json"
-        )
+        request = {
+            "model": stt_model,
+            "file": audio_file,
+            "response_format": "verbose_json",
+        }
+        try:
+            transcript = client.audio.transcriptions.create(
+                **request, timestamp_granularities=["word"]
+            )
+        except BadRequestError:
+            audio_file.seek(0)
+            transcript = client.audio.transcriptions.create(**request)
     language = getattr(transcript, "language", None)
-    return str(transcript.text).strip(), language
+    words = getattr(transcript, "words", None) or []
+    text = " ".join(word.word for word in words) if words else str(transcript.text)
+    return text.strip(), language
 
 def process_with_llm(client: OpenAI, messages: list[dict], llm_model: str) -> str:
     """Sends pre-built messages to an LLM and returns the response content."""

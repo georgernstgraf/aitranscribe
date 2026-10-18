@@ -77,8 +77,8 @@ The terminal UI is built with [Textual](https://textual.textualize.io/) and divi
 
 ### Recording modes
 
-- **Microphone**: press Space to start, Space again to stop. Press `P` to pause and resume without ending the session; only the audio recorded between pauses is transcribed. Press `Escape` to cancel and discard the recording. Audio is compressed to 32 kbps MP3 before sending.
-- **Filesystem file**: enter a file path in the File field and press Enter. Large files are automatically chunked (25 MB or 10-minute segments) to stay within API limits.
+- **Microphone**: press Space to start, Space again to stop. Press `P` to pause and resume without ending the session; only the audio recorded between pauses is transcribed. Press `Escape` to cancel and discard the recording. Audio is compressed to 32 kbps MP3 before sending; takes longer than 2 minutes are split at pauses into several uploads.
+- **Filesystem file**: enter a file path in the File field and press Enter. Files longer than 2 minutes (or larger than 25 MB) are automatically chunked to stay within API limits; cuts are placed in detected pauses, so no word is split.
 
 ### Pre-processing modes
 
@@ -169,7 +169,7 @@ aitranscribe/
 ## Architecture notes
 
 - **Audio pipeline**: microphone → raw WAV → MP3 (32 kbps) → Groq Whisper API → optional LLM post-processing → SQLite storage
-- **File transcription**: auto-chunking splits files > 25 MB into 10-minute segments, transcribes each, and joins results
+- **File transcription**: auto-chunking splits uploads longer than 2 minutes (or over 25 MB) into pause-aligned segments, transcribes each, and joins results
 - **Prompt manager**: SQLite database (`~/.config/aitranscribe/prompts.sqlite`) stores transcriptions with timestamps and auto-generated LLM summaries. Uses DELETE journal mode for cloud-sync (OneDrive, Dropbox) compatibility
 - **Recording files**: saved to the system temp directory with versioned filenames (`aitranscribe_record_v001.mp3`)
 - **Clipboard**: tries `wl-copy`, `xclip`, `xsel`, `pbcopy`, `clip.exe` in order, with OSC 52 escape sequence as fallback

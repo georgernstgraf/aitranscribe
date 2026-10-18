@@ -1372,8 +1372,12 @@ def test_report_recording_result_without_llm_skips_llm_output():
     assert "raw text" in printed
     mock_manager.add_prompt.assert_called_once_with("final text", "/tmp/a.mp3")
 
-def test_record_from_microphone_wires_pipeline_without_chunking():
-    """Orchestrator passes do_chunk=False and correct flags to the pipeline."""
+def test_record_from_microphone_wires_pipeline_with_chunking():
+    """Orchestrator passes do_chunk=True and correct flags to the pipeline.
+
+    Long takes must be chunked: Groq mangles transcripts of uploads over ~120 s
+    (docs/ai/PITFALLS.md).
+    """
     import numpy as np
     import main
 
@@ -1392,12 +1396,28 @@ def test_record_from_microphone_wires_pipeline_without_chunking():
 
     mock_capture.assert_called_once_with(False)
     kwargs = mock_pipeline.call_args.kwargs
-    assert kwargs["do_chunk"] is False
+    assert kwargs["do_chunk"] is True
     assert kwargs["needs_llm"] is True
     assert kwargs["target_language"] is None
     assert kwargs["stt_model"] == "whisper"
     assert kwargs["llm_model"] == "gpt"
     mock_report.assert_called_once_with("final", "raw", True, "/tmp/final.mp3")
+
+
+def test_process_recorded_audio_for_tui_chunks_long_takes():
+    """The TUI recording path must chunk too, not upload the whole take."""
+    import main
+
+    with patch.object(main, "prompt_manager", MagicMock()), \
+         patch("main.validate_api_keys"), \
+         patch("main._write_wav"), \
+         patch("main.get_recording_file_paths", return_value=("/tmp/raw.wav", "/tmp/final.mp3")), \
+         patch("main.compress_audio"), \
+         patch("main.os.path.exists", return_value=False), \
+         patch("main.run_transcription_pipeline", return_value=("final", "raw")) as mock_pipeline:
+        main.process_recorded_audio_for_tui(MagicMock(), {"pre_process_mode": "raw"})
+
+    assert mock_pipeline.call_args.kwargs["do_chunk"] is True
 
 def test_record_from_microphone_returns_early_when_capture_cancelled():
     """Cancelled capture skips file writing, pipeline, and reporting."""

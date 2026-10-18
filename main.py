@@ -1062,7 +1062,7 @@ def process_recorded_audio_for_tui(
             llm_model=str(settings.get("llm_model", LLM_MODEL)),
             needs_llm=needs_llm,
             target_language=target_language,
-            do_chunk=False,
+            do_chunk=True,
             on_transcript=transcript_callback,
             on_feedback=update_feedback,
         )
@@ -1684,7 +1684,7 @@ def record_from_microphone(stt_model: str, llm_model: str, post_process: bool, v
                 llm_model=llm_model,
                 needs_llm=needs_llm,
                 target_language=target_language,
-                do_chunk=False,
+                do_chunk=True,
                 on_progress=lambda message: progress.update(progress.task_ids[0], description=message),
             )
 
