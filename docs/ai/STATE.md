@@ -1,7 +1,7 @@
 # Project State
 
 2026-10-18: Groq's long-upload text mangle fixed (words[] reconstruction +
-120 s upload cap). 207 tests pass.
+120 s upload cap). Issue #83 closed, 208 tests pass.
 
 ## Current Focus
 Umlaut words came back cut ("führen" -> "F") because Groq mangles the `text`

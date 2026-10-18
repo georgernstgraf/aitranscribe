@@ -1,6 +1,6 @@
 # Handoff
 
-## 2026-10-18 session: Groq long-upload umlaut fix (words[] + 120 s cap)
+## 2026-10-18 session: Groq long-upload umlaut fix (#83, words[] + 120 s cap)
 - Root cause: Groq mangles `text`/`segments[].text` for uploads > ~120 s — each
   word loses everything from its first non-ASCII character on ("würde" -> "w",
   "natürlich" -> "nat", "ähnliches" -> gone). `words[]` stays correct; uploads
@@ -12,7 +12,8 @@
   `GROQ_MAX_UPLOAD_S = 120` with cut points snapped into silencedetect pauses
   and passed as `-segment_times`; `main.process_recorded_audio_for_tui` passes
   `do_chunk=True`.
-- Tests 207 passed (`PYNPUT_BACKEND=dummy ./venv/bin/pytest -q`).
+- Tests 208 passed (`PYNPUT_BACKEND=dummy ./venv/bin/pytest -q`). Issue #83
+  closed (commits 754f157, 81d2709).
 - Verified live against Groq with the previously mangled recordings v166/v189
   and the chunked 394 s v188 (pause-aligned seams). No pending implementation
   tasks.
@@ -58,4 +59,4 @@ P pause/resume to the TUI recording workflow.
   focused, `p` is typed into that widget.
 - By design, width changes do not reflow already-stored transcripts (DECISIONS 2026-09-27).
 
-Last cleared: 2026-10-04.
+Last cleared: 2026-10-18.
