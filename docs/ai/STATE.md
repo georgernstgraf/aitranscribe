@@ -1,7 +1,9 @@
 # Project State
 
 2026-10-25: TUI recording no longer freezes when the OS default input delivers
-no audio frames. Issue #84 closed, 215 tests pass.
+no audio frames, and capture now uses PortAudio's native PulseAudio/PipeWire
+host API instead of ALSA's `default` PCM. Issues #84 and #85 closed, 222 tests
+pass.
 
 ## Current Focus
 The OBSBOT webcam mic became the PipeWire default source after an Ubuntu
@@ -19,17 +21,25 @@ to another mic and everything works; that is the user's workaround.)
     `check_audio_input()` reopens the device once, then `report_no_audio_input()`
     cancels the take and shows the `No Audio Input` dialog naming the device.
   - `finish_recording()` with zero audio now names the device as well.
-- `README.md`: new "No audio from the input device" section.
+- `tui.resolve_input_device()` + `RecordingController.start()`: capture the
+  system default source through the native `PulseAudio`/`PipeWire` host API
+  (`device` index) instead of ALSA's `default` PCM — no `pa_linux_alsa.c`
+  assertion spam, `stop()+close()` in 0.02 s instead of 6–25 s.
+- `main._resolve_capture_device()`: same helper for the legacy CLI `record` path.
+- `README.md`: new "No audio from the input device" section incl. the host-API note.
 
 ## Verification
-- `PYNPUT_BACKEND=dummy ./venv/bin/pytest -q`: **215 passed** (6 new tests:
-  blocked-stream bound, frame counter/device label, label survives audio errors,
-  watchdog retry → dialog, no false alarm with frames, pause guard, device name
-  on empty take).
+- `PYNPUT_BACKEND=dummy ./venv/bin/pytest -q`: **222 passed** (blocked-stream
+  bound, frame counter/device label, watchdog retry → dialog, no false alarm with
+  frames, pause guard, device name on empty take, native host-API selection +
+  fallbacks, `start()` device index, CLI helper).
 - Live against the broken source (webcam via ALSA hw:1, 32 kHz): abort after
   **7 s** with the dialog, no freeze (baseline before the fix: 25 s hang).
-- Live against the healthy default source: 197,760 frames in 4.5 s, no false
-  alarm, `Space` → `Processing Recording`.
+- Live against the healthy default source via PulseAudio: 194,016 frames in
+  4.5 s, `device=Default Source (PulseAudio)`, `stalled_close=False`, **0**
+  ALSA assertion lines in stderr.
+- Live against the broken webcam source: abort after 4.5 s with the dialog and
+  0 stderr lines (before the host-API change: 25 s hang plus assertion spam).
 
 ## Blockers
 - None.

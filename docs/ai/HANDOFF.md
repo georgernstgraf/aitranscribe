@@ -11,8 +11,12 @@
   (`schedule_audio_probe` → `check_audio_input` → `report_no_audio_input` with
   a `No Audio Input` dialog), device name in the zero-audio messages, README
   troubleshooting section.
-- Verified: 215 tests pass; live broken source aborts after 7 s with the dialog;
-  live healthy source records 197k frames without a false alarm.
+- Follow-up #85 (commit 7afe067): capture now goes through PortAudio's native
+  `PulseAudio`/`PipeWire` host API instead of ALSA's `default` PCM, which had
+  spammed `pa_linux_alsa.c` failed assertions and stalled `Pa_StopStream` for
+  6-25 s. Broken source now aborts after 4.5 s with 0 stderr lines.
+- Verified: 222 tests pass; live broken source aborts with the dialog; live
+  healthy source records 194k frames via `Default Source (PulseAudio)`.
 - User-side workaround (already applied by the owner): set the Ubuntu sound
   input to the internal/external mic instead of the webcam.
 - No pending implementation tasks.
@@ -21,7 +25,9 @@
 - Host has no `Xvfb`/`xvfb-run`; headless pytest works with `PYNPUT_BACKEND=dummy`.
 - Audio diagnostics on think: `./venv/bin/python -c "import sounddevice as sd;
   print(sd.query_devices(kind='input'))"` plus a 2 s `InputStream` probe that
-  counts callbacks — a source that returns 0 callbacks is the failure mode above.
+  counts callbacks and inspects `sd.query_hostapis()` — a source that returns
+  0 callbacks is the failure mode above; if the default input belongs to the
+  `ALSA` host API, capture is going through the PipeWire plugin (see #85).
 - `P` and `Escape` are Command-Mode hotkeys; `Space` stops an active recording
   only while nothing is focused (Pane Focus Mode types instead).
 - By design, width changes do not reflow already-stored transcripts (DECISIONS 2026-09-27).
