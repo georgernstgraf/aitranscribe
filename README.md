@@ -88,6 +88,12 @@ microphones behind PipeWire are a common case), the TUI no longer freezes on
 dialog naming the device. Switch the system sound input to another microphone
 and press `Space` again.
 
+Microphone capture goes through PortAudio's native **PulseAudio/PipeWire**
+client when the host provides one, so the system default source (as set in the
+desktop sound settings) is used directly and ALSA's `default` PCM — which spams
+`pa_linux_alsa.c` failed assertions and can block for tens of seconds — is
+avoided.
+
 ### Pre-processing modes
 
 Three modes control what happens after transcription:

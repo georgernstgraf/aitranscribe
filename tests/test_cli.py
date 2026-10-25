@@ -785,6 +785,23 @@ def test_process_file_for_tui_english_mode_uses_llm(tmp_path):
     assert result["text"] == "polished"
     assert result["raw_text"] == "raw words"
 
+def test_resolve_capture_device_uses_native_pulse_device():
+    import main
+
+    with patch("main._get_sd") as mock_get_sd, patch(
+        "tui.resolve_input_device", return_value=(24, "Default Source (PulseAudio)")
+    ) as mock_resolve:
+        assert main._resolve_capture_device() == 24
+    mock_resolve.assert_called_once_with(mock_get_sd.return_value)
+
+
+def test_resolve_capture_device_returns_none_without_native_api():
+    import main
+
+    with patch("main._get_sd"), patch("tui.resolve_input_device", return_value=(None, "default input")):
+        assert main._resolve_capture_device() is None
+
+
 def test_wrap_text_short():
     """Test that wrap_text doesn't wrap short text."""
     result = wrap_text("Short text", 80)

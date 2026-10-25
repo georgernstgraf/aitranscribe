@@ -458,6 +458,18 @@ def _get_sd():
     return _sd
 
 
+def _resolve_capture_device() -> int | None:
+    """PortAudio device index for microphone capture.
+
+    Prefers the native PulseAudio/PipeWire default input over ALSA's `default`
+    PCM (see `tui.resolve_input_device`).
+    """
+    from tui import resolve_input_device
+
+    device, _label = resolve_input_device(_get_sd())
+    return device
+
+
 def _write_wav(filename: str, data: "np.ndarray", samplerate: int) -> None:
     """Write a NumPy array as a 16-bit PCM WAV file using stdlib."""
     import wave
@@ -1521,7 +1533,12 @@ def _record_until_toggle(
         sys.stdout.write("\033[?25l")
         sys.stdout.flush()
 
-        with _get_sd().InputStream(samplerate=samplerate, channels=channels, callback=callback):
+        with _get_sd().InputStream(
+            samplerate=samplerate,
+            channels=channels,
+            device=_resolve_capture_device(),
+            callback=callback,
+        ):
             start_time = None
             last_update = 0.0
             total_start_time = time.time()

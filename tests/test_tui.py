@@ -11,7 +11,16 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import numpy as np
 
-from tui import AitranscribeTUI, ErrorDialog, RecordingController, build_osc52_sequence, copy_text_to_clipboard, copy_text_with_osc52, get_clipboard_command
+from tui import (
+    AitranscribeTUI,
+    ErrorDialog,
+    RecordingController,
+    build_osc52_sequence,
+    copy_text_to_clipboard,
+    copy_text_with_osc52,
+    get_clipboard_command,
+    resolve_input_device,
+)
 from textual.containers import Vertical
 from textual.widgets import Input, OptionList, Static, TextArea
 
@@ -1528,8 +1537,64 @@ def test_recording_controller_counts_frames_and_reports_device():
     assert controller.frames_captured == 1024
 
     with patch("tui._get_sd") as mock_sd:
-        mock_sd.return_value.query_devices.return_value = {"name": "OBSBOT Meet SE"}
-        assert controller.device_label() == "OBSBOT Meet SE"
+        mock_sd.return_value.query_hostapis.return_value = [
+            {"name": "ALSA", "default_input_device": 22},
+            {"name": "PulseAudio", "default_input_device": 24},
+        ]
+        mock_sd.return_value.query_devices.return_value = {"name": "Default Source"}
+        assert controller.device_label() == "Default Source (PulseAudio)"
+
+
+def test_resolve_input_device_prefers_native_pulse_host_api():
+    mock_sd = Mock()
+    mock_sd.query_hostapis.return_value = [
+        {"name": "ALSA", "default_input_device": 22},
+        {"name": "PulseAudio", "default_input_device": 24},
+    ]
+    mock_sd.query_devices.return_value = {"name": "Default Source"}
+
+    assert resolve_input_device(mock_sd) == (24, "Default Source (PulseAudio)")
+
+
+def test_resolve_input_device_falls_back_to_portaudio_default():
+    mock_sd = Mock()
+    mock_sd.query_hostapis.return_value = [{"name": "ALSA", "default_input_device": 22}]
+
+    assert resolve_input_device(mock_sd) == (None, "default input")
+
+
+def test_resolve_input_device_ignores_native_api_without_input():
+    mock_sd = Mock()
+    mock_sd.query_hostapis.return_value = [
+        {"name": "PulseAudio", "default_input_device": -1},
+        {"name": "ALSA", "default_input_device": 22},
+    ]
+
+    assert resolve_input_device(mock_sd) == (None, "default input")
+
+
+def test_resolve_input_device_survives_query_errors():
+    mock_sd = Mock()
+    mock_sd.query_hostapis.side_effect = RuntimeError("no portaudio")
+
+    assert resolve_input_device(mock_sd) == (None, "default input")
+
+
+def test_recording_controller_start_opens_the_native_device():
+    controller = RecordingController()
+    mock_sd = Mock()
+    mock_sd.query_hostapis.return_value = [{"name": "PulseAudio", "default_input_device": 24}]
+    mock_sd.query_devices.return_value = {"name": "Default Source"}
+
+    with patch("tui._get_sd", return_value=mock_sd):
+        controller.start()
+
+    mock_sd.InputStream.assert_called_once_with(
+        samplerate=44100, channels=1, device=24, callback=controller._callback
+    )
+    assert controller.device == 24
+    assert controller.device_label() == "Default Source (PulseAudio)"
+    assert controller.is_recording is True
 
 
 def test_recording_controller_device_label_survives_audio_errors():

@@ -153,6 +153,42 @@ frames) makes `stream.stop()` block for 10-25 s, which freezes the TUI on
 AUDIO_PROBE_DELAY_S = 2.0
 """Delay before the TUI checks whether the input device delivered any frames."""
 
+NATIVE_HOST_APIS = ("PulseAudio", "PipeWire")
+"""Host APIs preferred over ALSA's `default` PCM for microphone capture.
+
+ALSA's `default` PCM is the PulseAudio/PipeWire plugin: it floods stderr with
+`pa_linux_alsa.c` failed assertions, reports a bogus 128-channel device and can
+block `Pa_StopStream` for tens of seconds on a suspended node. The native
+client reaches the same system default without any of that.
+"""
+
+
+def resolve_input_device(sd_module: Any) -> tuple[int | None, str]:
+    """Return (PortAudio device index, display label) for microphone capture.
+
+    Prefers the default input of a native PulseAudio/PipeWire host API and
+    falls back to PortAudio's own default (`None`) when none is available.
+    """
+    try:
+        host_apis = sd_module.query_hostapis()
+    except Exception:
+        return None, "default input"
+
+    for host_api in host_apis:
+        name = host_api.get("name")
+        if name not in NATIVE_HOST_APIS:
+            continue
+        device = host_api.get("default_input_device")
+        if device is None or int(device) < 0:
+            continue
+        try:
+            device_name = str(sd_module.query_devices(int(device), "input")["name"])
+        except Exception:
+            continue
+        return int(device), f"{device_name} ({name})"
+
+    return None, "default input"
+
 
 def _close_stream_bounded(stream: Any, timeout: float = STREAM_STOP_TIMEOUT_S) -> bool:
     """Stop and close a PortAudio stream without blocking the caller for long.
@@ -198,6 +234,8 @@ class RecordingController:
         self.paused = False
         self.frames_captured = 0
         self.last_close_stalled = False
+        self.device: int | None = None
+        self.device_name = ""
 
     def _callback(self, indata: np.ndarray, frames: int, cb_time: Any, status: Any) -> None:
         del frames, cb_time, status
@@ -206,13 +244,18 @@ class RecordingController:
             self.frames_captured += len(indata)
 
     def start(self) -> None:
+        sd_module = _get_sd()
+        device, label = resolve_input_device(sd_module)
+        self.device = device
+        self.device_name = label
         self._chunks = []
         self.frames_captured = 0
         self.last_close_stalled = False
         self.paused = False
-        self._stream = _get_sd().InputStream(
+        self._stream = sd_module.InputStream(
             samplerate=self.samplerate,
             channels=self.channels,
+            device=device,
             callback=self._callback,
         )
         self._stream.start()
@@ -226,8 +269,11 @@ class RecordingController:
 
     def device_label(self) -> str:
         """Name of the input device this controller records from."""
+        if self.device_name:
+            return self.device_name
         try:
-            return str(_get_sd().query_devices(None, "input")["name"])
+            _device, label = resolve_input_device(_get_sd())
+            return label
         except Exception:
             return "default input"
 
