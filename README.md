@@ -80,6 +80,14 @@ The terminal UI is built with [Textual](https://textual.textualize.io/) and divi
 - **Microphone**: press Space to start, Space again to stop. Press `P` to pause and resume without ending the session; only the audio recorded between pauses is transcribed. Press `Escape` to cancel and discard the recording. Audio is compressed to 32 kbps MP3 before sending; takes longer than 2 minutes are split at pauses into several uploads.
 - **Filesystem file**: enter a file path in the File field and press Enter. Files longer than 2 minutes (or larger than 25 MB) are automatically chunked to stay within API limits; cuts are placed in detected pauses, so no word is split.
 
+### No audio from the input device
+
+If the system's default input is a source that never delivers frames (webcam
+microphones behind PipeWire are a common case), the TUI no longer freezes on
+`Recording`: it retries once, then aborts the take with a **No Audio Input**
+dialog naming the device. Switch the system sound input to another microphone
+and press `Space` again.
+
 ### Pre-processing modes
 
 Three modes control what happens after transcription:

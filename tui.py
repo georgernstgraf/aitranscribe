@@ -6,6 +6,7 @@ import shutil
 import subprocess
 import sys
 import textwrap
+import threading
 from dataclasses import dataclass
 from typing import Any, Callable, Mapping
 
@@ -141,6 +142,50 @@ def _get_sd():
     return _sd
 
 
+STREAM_STOP_TIMEOUT_S = 1.5
+"""Upper bound for closing a PortAudio stream before the UI may continue.
+
+A suspended PipeWire/PulseAudio source (e.g. a webcam mic that delivers no
+frames) makes `stream.stop()` block for 10-25 s, which freezes the TUI on
+"Recording" and then ends in a bare "No audio recorded".
+"""
+
+AUDIO_PROBE_DELAY_S = 2.0
+"""Delay before the TUI checks whether the input device delivered any frames."""
+
+
+def _close_stream_bounded(stream: Any, timeout: float = STREAM_STOP_TIMEOUT_S) -> bool:
+    """Stop and close a PortAudio stream without blocking the caller for long.
+
+    Returns True when the stream closed within `timeout`. On timeout the stream
+    is aborted from a fire-and-forget thread and False is returned; the caller
+    must not wait for the backend to recover.
+    """
+
+    done = threading.Event()
+
+    def close_stream() -> None:
+        try:
+            stream.stop()
+            stream.close()
+        except Exception:
+            pass
+        finally:
+            done.set()
+
+    def abort_stream() -> None:
+        try:
+            stream.abort()
+        except Exception:
+            pass
+
+    threading.Thread(target=close_stream, name="aitranscribe-stream-close", daemon=True).start()
+    if done.wait(timeout):
+        return True
+    threading.Thread(target=abort_stream, name="aitranscribe-stream-abort", daemon=True).start()
+    return False
+
+
 @dataclass
 class RecordingController:
     samplerate: int = 44100
@@ -151,14 +196,19 @@ class RecordingController:
         self._stream: sd.InputStream | None = None
         self.is_recording = False
         self.paused = False
+        self.frames_captured = 0
+        self.last_close_stalled = False
 
     def _callback(self, indata: np.ndarray, frames: int, cb_time: Any, status: Any) -> None:
         del frames, cb_time, status
         if self.is_recording and not self.paused:
             self._chunks.append(indata.copy())
+            self.frames_captured += len(indata)
 
     def start(self) -> None:
         self._chunks = []
+        self.frames_captured = 0
+        self.last_close_stalled = False
         self.paused = False
         self._stream = _get_sd().InputStream(
             samplerate=self.samplerate,
@@ -174,13 +224,20 @@ class RecordingController:
     def resume(self) -> None:
         self.paused = False
 
+    def device_label(self) -> str:
+        """Name of the input device this controller records from."""
+        try:
+            return str(_get_sd().query_devices(None, "input")["name"])
+        except Exception:
+            return "default input"
+
     def stop(self) -> np.ndarray | None:
         self.is_recording = False
         self.paused = False
-        if self._stream is not None:
-            self._stream.stop()
-            self._stream.close()
-            self._stream = None
+        stream = self._stream
+        self._stream = None
+        if stream is not None:
+            self.last_close_stalled = not _close_stream_bounded(stream)
 
         if not self._chunks:
             return None
@@ -533,6 +590,8 @@ class AitranscribeTUI(App[None]):
         self.append_mode: bool = False
         self.append_target_id: int | None = None
         self.append_base_text: str = ""
+        self._audio_probe_timer: Any = None
+        self._audio_retry_done = False
         self.flash_message = ""
 
     class FocusModeChanged(Message):
@@ -817,6 +876,7 @@ class AitranscribeTUI(App[None]):
 
     def cancel_recording(self) -> None:
         """Abort an active recording and discard the captured audio."""
+        self.cancel_audio_probe()
         self.recorder.stop()
         self.is_recording = False
         self.is_paused = False
@@ -913,6 +973,7 @@ class AitranscribeTUI(App[None]):
 
         self.is_recording = True
         self.is_paused = False
+        self._audio_retry_done = False
         if not self.append_mode:
             self.clear_history_selection()
         self.latest_file_path = None
@@ -925,16 +986,67 @@ class AitranscribeTUI(App[None]):
         self.reset_feedback()
         self.refresh_status()
         self.refresh_transcript()
+        self.schedule_audio_probe()
+
+    def schedule_audio_probe(self) -> None:
+        """Check shortly after start whether the device delivers audio frames."""
+        self.cancel_audio_probe()
+        if not self.is_running:
+            return
+        self._audio_probe_timer = self.set_timer(AUDIO_PROBE_DELAY_S, self.check_audio_input)
+
+    def cancel_audio_probe(self) -> None:
+        timer = self._audio_probe_timer
+        self._audio_probe_timer = None
+        if timer is not None:
+            timer.stop()
+
+    def check_audio_input(self) -> None:
+        self._audio_probe_timer = None
+        if not self.is_recording or self.is_paused or self.recorder.frames_captured > 0:
+            return
+
+        if not self._audio_retry_done:
+            # A suspended PipeWire node often recovers on a second open.
+            self._audio_retry_done = True
+            self.recorder.stop()
+            try:
+                self.recorder.start()
+            except Exception:
+                self.report_no_audio_input()
+                return
+            self.schedule_audio_probe()
+            return
+
+        self.report_no_audio_input()
+
+    def report_no_audio_input(self) -> None:
+        device = self.recorder.device_label()
+        self.cancel_recording()
+        self.set_status_message(f"No audio from input device '{device}'.")
+        self.refresh_status()
+        self.push_screen(ErrorDialog(
+            title="No Audio Input",
+            message=f"The input device '{device}' delivered no audio frames.",
+            detail=(
+                "The recording was stopped. Switch the system sound input to another "
+                "microphone (or pick a different default source) and try again — "
+                "webcam microphones are frequently unusable as a suspended PipeWire source."
+            ),
+            fatal=False,
+        ))
 
     def finish_recording(self) -> None:
+        self.cancel_audio_probe()
         audio = self.recorder.stop()
         self.is_recording = False
         self.is_paused = False
         if audio is None or len(audio) == 0:
+            device = self.recorder.device_label()
             self.cancel_append_mode()
-            self.latest_transcript = "No audio recorded."
+            self.latest_transcript = f"No audio recorded from '{device}'."
             self.latest_file_path = None
-            self.set_status_message("No audio recorded.")
+            self.set_status_message(f"No audio from input device '{device}'.")
             self.refresh_transcript()
             self.refresh_status()
             return

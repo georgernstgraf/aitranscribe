@@ -11,7 +11,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import numpy as np
 
-from tui import AitranscribeTUI, RecordingController, build_osc52_sequence, copy_text_to_clipboard, copy_text_with_osc52, get_clipboard_command
+from tui import AitranscribeTUI, ErrorDialog, RecordingController, build_osc52_sequence, copy_text_to_clipboard, copy_text_with_osc52, get_clipboard_command
 from textual.containers import Vertical
 from textual.widgets import Input, OptionList, Static, TextArea
 
@@ -1479,3 +1479,186 @@ async def test_escape_without_recording_returns_to_command_mode():
         assert app.is_command_mode() is True
         state_text = str(app.query_one("#state_status", Static).render())
         assert state_text == "Command Mode | Ready"
+
+
+class _BlockingStream:
+    """Stream whose stop() hangs like a suspended PipeWire source."""
+
+    def __init__(self, delay: float = 5.0) -> None:
+        self.delay = delay
+        self.closed = False
+        self.aborted = False
+
+    def stop(self) -> None:
+        import time
+
+        time.sleep(self.delay)
+
+    def close(self) -> None:
+        self.closed = True
+
+    def abort(self) -> None:
+        self.aborted = True
+
+
+def test_recording_controller_stop_does_not_block_on_stalled_stream():
+    controller = RecordingController()
+    controller._stream = _BlockingStream(delay=5.0)
+    controller.is_recording = True
+
+    import time
+
+    started = time.monotonic()
+    audio = controller.stop()
+    elapsed = time.monotonic() - started
+
+    assert audio is None
+    assert elapsed < 2.5, f"stop() blocked for {elapsed:.1f}s"
+    assert controller.last_close_stalled is True
+    assert controller._stream is None
+    assert controller.is_recording is False
+
+
+def test_recording_controller_counts_frames_and_reports_device():
+    controller = RecordingController()
+    controller.is_recording = True
+    controller._callback(np.zeros((512, 1), dtype=np.float32), 512, None, None)
+    controller._callback(np.zeros((512, 1), dtype=np.float32), 512, None, None)
+
+    assert controller.frames_captured == 1024
+
+    with patch("tui._get_sd") as mock_sd:
+        mock_sd.return_value.query_devices.return_value = {"name": "OBSBOT Meet SE"}
+        assert controller.device_label() == "OBSBOT Meet SE"
+
+
+def test_recording_controller_device_label_survives_audio_errors():
+    controller = RecordingController()
+
+    with patch("tui._get_sd", side_effect=RuntimeError("no portaudio")):
+        assert controller.device_label() == "default input"
+
+
+@pytest.mark.anyio
+async def test_audio_watchdog_retries_then_reports_missing_frames():
+    prompt_manager = Mock()
+    prompt_manager.count_prompts.return_value = 0
+    prompt_manager.recent_prompts.return_value = []
+
+    app = AitranscribeTUI(
+        prompt_manager=prompt_manager,
+        process_audio=Mock(),
+        process_file=Mock(),
+        stt_provider_name="Groq",
+        llm_provider_name="openrouter",
+        default_stt_model="whisper",
+        default_llm_model="gpt",
+        initial_settings={"pre_process_mode": "english", "input_source": "microphone"},
+    )
+
+    async with app.run_test() as pilot:
+        with patch.object(app.recorder, "start") as mock_start, patch.object(app.recorder, "stop"), patch.object(
+            app.recorder, "device_label", return_value="OBSBOT Meet SE"
+        ):
+            app.start_recording()
+            assert app.is_recording is True
+            assert app._audio_probe_timer is not None
+
+            app.check_audio_input()
+            assert app.is_recording is True
+            assert mock_start.call_count == 2
+            assert app._audio_probe_timer is not None
+
+            app.check_audio_input()
+            await pilot.pause()
+
+        assert app.is_recording is False
+        assert app.is_paused is False
+        assert app._audio_probe_timer is None
+        assert app.status_text == "No audio from input device 'OBSBOT Meet SE'."
+        assert isinstance(app.screen, ErrorDialog)
+
+
+@pytest.mark.anyio
+async def test_audio_watchdog_leaves_healthy_recording_alone():
+    prompt_manager = Mock()
+    prompt_manager.count_prompts.return_value = 0
+    prompt_manager.recent_prompts.return_value = []
+
+    app = AitranscribeTUI(
+        prompt_manager=prompt_manager,
+        process_audio=Mock(),
+        process_file=Mock(),
+        stt_provider_name="Groq",
+        llm_provider_name="openrouter",
+        default_stt_model="whisper",
+        default_llm_model="gpt",
+        initial_settings={"pre_process_mode": "english", "input_source": "microphone"},
+    )
+
+    async with app.run_test():
+        with patch.object(app.recorder, "start"), patch.object(app.recorder, "stop") as mock_stop:
+            app.start_recording()
+            app.recorder.frames_captured = 4410
+
+            app.check_audio_input()
+
+        assert app.is_recording is True
+        mock_stop.assert_not_called()
+
+
+@pytest.mark.anyio
+async def test_audio_watchdog_skips_paused_recording():
+    prompt_manager = Mock()
+    prompt_manager.count_prompts.return_value = 0
+    prompt_manager.recent_prompts.return_value = []
+
+    app = AitranscribeTUI(
+        prompt_manager=prompt_manager,
+        process_audio=Mock(),
+        process_file=Mock(),
+        stt_provider_name="Groq",
+        llm_provider_name="openrouter",
+        default_stt_model="whisper",
+        default_llm_model="gpt",
+        initial_settings={"pre_process_mode": "english", "input_source": "microphone"},
+    )
+
+    async with app.run_test():
+        with patch.object(app.recorder, "start"), patch.object(app.recorder, "stop") as mock_stop:
+            app.start_recording()
+            app.is_paused = True
+
+            app.check_audio_input()
+
+        assert app.is_recording is True
+        mock_stop.assert_not_called()
+
+
+@pytest.mark.anyio
+async def test_finish_recording_names_device_when_no_audio_arrives():
+    prompt_manager = Mock()
+    prompt_manager.count_prompts.return_value = 0
+    prompt_manager.recent_prompts.return_value = []
+
+    app = AitranscribeTUI(
+        prompt_manager=prompt_manager,
+        process_audio=Mock(),
+        process_file=Mock(),
+        stt_provider_name="Groq",
+        llm_provider_name="openrouter",
+        default_stt_model="whisper",
+        default_llm_model="gpt",
+        initial_settings={"pre_process_mode": "english", "input_source": "microphone"},
+    )
+
+    async with app.run_test():
+        app.is_recording = True
+        with patch.object(app.recorder, "stop", return_value=None), patch.object(
+            app.recorder, "device_label", return_value="OBSBOT Meet SE"
+        ):
+            app.finish_recording()
+
+        assert app.is_recording is False
+        assert app.status_text == "No audio from input device 'OBSBOT Meet SE'."
+        assert app.latest_transcript == "No audio recorded from 'OBSBOT Meet SE'."
