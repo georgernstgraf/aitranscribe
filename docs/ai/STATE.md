@@ -1,55 +1,62 @@
 # Project State
 
-2026-10-25: TUI recording no longer freezes when the OS default input delivers
-no audio frames, and capture now uses PortAudio's native PulseAudio/PipeWire
-host API instead of ALSA's `default` PCM. Issues #84 and #85 closed, 222 tests
-pass.
+2026-10-27: Configuration is TOML now (`config.toml`, schema version 2) with
+independent per-scope provider profiles. Issue #86 shipped and closed, 254
+tests pass, live setup verified: STT on a self-hosted Whisper endpoint, LLM
+post-processing on Groq.
 
 ## Current Focus
-The OBSBOT webcam mic became the PipeWire default source after an Ubuntu
-upgrade and delivered **zero callbacks** to `sounddevice` at 44.1 kHz, while
-`stream.stop()` blocked 6.8–25 s on the Textual event loop — the TUI sat on
-`Recording` and ended in a bare "No audio recorded". (Switch the system input
-to another mic and everything works; that is the user's workaround.)
 
-- `tui.py`:
-  - `_close_stream_bounded()` stops/closes a PortAudio stream in a daemon thread
-    with an `abort()` fallback, bounded by `STREAM_STOP_TIMEOUT_S = 1.5`.
-  - `RecordingController`: `frames_captured` counter, `device_label()`,
-    `last_close_stalled`, bounded `stop()`.
-  - `AitranscribeTUI`: `schedule_audio_probe()` (`AUDIO_PROBE_DELAY_S = 2`) →
-    `check_audio_input()` reopens the device once, then `report_no_audio_input()`
-    cancels the take and shows the `No Audio Input` dialog naming the device.
-  - `finish_recording()` with zero audio now names the device as well.
-- `tui.resolve_input_device()` + `RecordingController.start()`: capture the
-  system default source through the native `PulseAudio`/`PipeWire` host API
-  (`device` index) instead of ALSA's `default` PCM — no `pa_linux_alsa.c`
-  assertion spam, `stop()+close()` in 0.02 s instead of 6–25 s.
-- `main._resolve_capture_device()`: same helper for the legacy CLI `record` path.
-- `README.md`: new "No audio from the input device" section incl. the host-API note.
+The dotenv config (`aitranscribe.conf`) was replaced because it could no longer
+be edited: `_migrate_config()` re-appended blocks on every start (commented keys
+are invisible to `dotenv_values`) — the owner's file held **118 duplicated
+Cohere blocks in 511 lines** — and it could not express "STT self-hosted, LLM
+cloud" at all (hardcoded Groq STT base URL, one shared `GROQ_API_KEY`).
+
+- `config.py` (new): schema v2, `load()`, key resolution (`api_key`/
+  `api_key_env`, string or array, env first), validation with profile lists in
+  error messages, `set_value()` (tomlkit, comment-preserving), renderer,
+  `create_default()`, one-shot dotenv migration with `.bak-<timestamp>`.
+- `main.py`: globals are derived from the loaded config (`CONFIG`,
+  `STT_ENDPOINT`, `LLM_ENDPOINT`, `STT_PROVIDER/LLM_PROVIDER`,
+  `STT_MODEL/LLM_MODEL`); `_build_client()` keeps credentials inside their
+  scope; `_chunk_with_active_profile()` passes the profile's ceilings to
+  `chunk_audio`; new `aitranscribe config show|check [--probe]|edit|migrate|path`.
+- `tui.py`: STT/LLM `Select`s in the Configuration panel, model follows the
+  provider, provider switches persist `[<scope>].provider` only.
+- `config.example.toml` replaces `config.example`; README documents the schema,
+  the built-in provider defaults and the config commands.
+- Owner's live `~/.config/aitranscribe/config.toml` migrated automatically on
+  first start and then switched to `[stt].provider = "selfhosted-1"`
+  (`https://whisper.kik.spengergasse.at/v1`, `large-v3`, 900 s/100 MB) with
+  `[llm].provider = "groq"` (`openai/gpt-oss-120b`) unchanged.
 
 ## Verification
-- `PYNPUT_BACKEND=dummy ./venv/bin/pytest -q`: **222 passed** (blocked-stream
-  bound, frame counter/device label, watchdog retry → dialog, no false alarm with
-  frames, pause guard, device name on empty take, native host-API selection +
-  fallbacks, `start()` device index, CLI helper).
-- Live against the broken source (webcam via ALSA hw:1, 32 kHz): abort after
-  **7 s** with the dialog, no freeze (baseline before the fix: 25 s hang).
-- Live against the healthy default source via PulseAudio: 194,016 frames in
-  4.5 s, `device=Default Source (PulseAudio)`, `stalled_close=False`, **0**
-  ALSA assertion lines in stderr.
-- Live against the broken webcam source: abort after 4.5 s with the dialog and
-  0 stderr lines (before the host-API change: 25 s hang plus assertion spam).
+
+- `PYNPUT_BACKEND=dummy ./venv/bin/pytest -q`: **254 passed**
+  (21 new in `tests/test_config.py`; CLI/TUI integration for key isolation,
+  provider switch, comment-preserving writes, `config show|check|migrate`).
+- `aitranscribe config check --probe`: both active profiles reachable
+  (selfhosted-1 → gregor via `whisper.kik.spengergasse.at`, groq → LLM).
+- Live pipeline run: raw STT from gregor with umlauts intact, then Groq
+  post-processing — both return the expected text.
+- Headless TUI smoke (`run_test()`): provider selects show `selfhosted-1` and
+  `groq`, model input prefilled `large-v3`.
 
 ## Blockers
+
 - None.
 
 ## Next Session Suggestion
-- `DECISIONS.md` (237 lines) still exceeds the 200-line guide; split by topic
-  (e.g. `DECISIONS-tui.md`, `DECISIONS-audio.md`) next time it is touched.
+
+- `docs/ai/DECISIONS.md` is 249 lines (guide: 200) — split by topic next time
+  it is touched (e.g. `DECISIONS-config.md`, `DECISIONS-audio.md`).
+- `~/.config/aitranscribe/.aitranscribe.conf.swp` is a leftover vim swap file
+  from the old dotenv config; harmless, safe to delete.
+- `python-dotenv` is only used by the migration now; drop it in the release
+  after next (keep `config._legacy_values` until then).
 - Pre-existing watch items: a small-but-long file with failing `ffprobe` is
-  returned unsplit by `chunk_audio`; `transcribe_audio` has no retry/backoff for
-  transient Groq failures (429s); charset hygiene in `main.py:80/131`
-  (no `encoding="utf-8"`) and `tui.py` clipboard `subprocess` (locale encoding).
+  returned unsplit by `chunk_audio`; `transcribe_audio` has no retry/backoff
+  for transient 429s.
 - Groq support report (mangled `text` >120 s, correct `words[]`) still owed
   upstream.
