@@ -46,6 +46,15 @@ config directory, and the owner's live setup was re-synced from think.
 
 - `docs/ai/DECISIONS.md` is ~260 lines (guide: 200) — split by topic next touch
   (`DECISIONS-config.md`, `DECISIONS-audio.md`, `DECISIONS-prompts.md`).
+- elite's live `config.toml` now mirrors think's active scopes: `[stt]
+  selfhosted-1` (gregor `large-v3`, 900 s/100 MB) and `[llm] groq`
+  (`openai/gpt-oss-120b`); both API keys were copied from think. Verified with
+  a real pipeline run (espeak test MP3 → umlauts intact → Groq cleanup).
+- elite's `[llm.providers.openrouter]` keeps a real key but a deprecated model
+  (`anthropic/claude-3-haiku`, 404 since 2026-09-10). Retarget it (e.g.
+  `anthropic/claude-haiku-4.5`) or delete the profile before switching back.
+- A snapshot of the pre-change elite config is at
+  `~/.config/aitranscribe/config.toml.bak-20261027-190245`.
 - `~/.config/aitranscribe/.aitranscribe.conf.swp` is a leftover vim swap file
   from the old dotenv config; harmless, safe to delete.
 - `python-dotenv` is only used by the migration now; drop it in the release

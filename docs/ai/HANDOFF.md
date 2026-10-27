@@ -18,6 +18,19 @@
   substitutes.
 - No pending implementation tasks.
 
+## Live config on elite (2026-10-27, after the gregor migration)
+- `[stt] selfhosted-1` → `https://whisper.kik.spengergasse.at/v1`, `large-v3`,
+  900 s / 100 MB (same profile as think; the API key was copied from think).
+- `[llm] groq` → `openai/gpt-oss-120b` (think's setup). elite's previous
+  `openrouter` profile kept a placeholder key and a deprecated model
+  (`anthropic/claude-3-haiku` → 404 since 2026-09-10), so post-processing could
+  not work at all before this change.
+- `stt.groq`, `llm.groq`, `llm.openrouter` keys copied from think; only
+  `openrouter`'s model is still stale.
+- Backup: `~/.config/aitranscribe/config.toml.bak-20261027-190245`.
+- Verified end to end: `config check --probe` green for both active scopes, and
+  a real espeak test MP3 went gregor-STT → Groq post-process with umlauts intact.
+
 ## Notes for the next agent
 - Never add a scope-level override (e.g. `[stt].model`): one value, one place —
   the profile owns its model. Ad-hoc overrides are CLI flags.
