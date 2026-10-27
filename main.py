@@ -7,6 +7,7 @@ import subprocess
 import textwrap
 import tomllib
 import copy
+import tomlkit
 import typer
 import numpy as np
 import tempfile
@@ -208,6 +209,38 @@ def _upgrade_legacy_prompt_defaults(data: dict) -> list[str]:
     return upgraded
 
 
+def _seed_missing_prompt_keys() -> list[str]:
+    """Insert required keys that older prompts.toml files simply do not have.
+
+    A file predating a required table (e.g. ``post_process.system``, added in
+    #73) used to abort in :func:`_validate_prompts` with a bare ``sys.exit(1)``.
+    It is now repaired in place from the shipped template, comment-preserving;
+    existing keys — including user customizations — are never touched.
+
+    Returns the dotted paths that were seeded.
+    """
+    defaults = tomllib.loads(_DEFAULT_PROMPTS_TOML)
+    doc = tomlkit.parse(PROMPTS_CONFIG.read_text())
+    seeded: list[str] = []
+
+    def seed(target: Any, source: dict, path: tuple[str, ...] = ()) -> None:
+        for key, value in source.items():
+            if key not in target:
+                target[key] = (
+                    tomlkit.string(value, multiline="\n" in value)
+                    if isinstance(value, str)
+                    else value
+                )
+                seeded.append(".".join(path + (key,)))
+            elif isinstance(value, dict):
+                seed(target[key], value, path + (key,))
+
+    seed(doc, defaults)
+    if seeded:
+        PROMPTS_CONFIG.write_text(tomlkit.dumps(doc))
+    return seeded
+
+
 def _load_prompts() -> dict:
     if not PROMPTS_CONFIG.exists():
         CONFIG_DIR.mkdir(parents=True, exist_ok=True)
@@ -216,6 +249,13 @@ def _load_prompts() -> dict:
 
     with open(PROMPTS_CONFIG, "rb") as f:
         data = tomllib.load(f)
+
+    seeded = _seed_missing_prompt_keys()
+    if seeded:
+        console.print(
+            f"Added missing prompt key(s) {', '.join(seeded)} to {PROMPTS_CONFIG}"
+        )
+        data = tomllib.loads(PROMPTS_CONFIG.read_text())
 
     _upgrade_legacy_prompt_defaults(data)
     _validate_prompts(data)

@@ -317,6 +317,17 @@ def _keyboard_era_prompts_toml() -> str:
     return _DEFAULT_PROMPTS_TOML.replace(new_system, _LEGACY_POST_PROCESS_SYSTEM)
 
 
+def _pre_system_table_prompts_toml(user_template: str | None = None) -> str:
+    """Reconstruct a pre-#73 prompts file: no [post_process.system] table at all."""
+    start = _DEFAULT_PROMPTS_TOML.index("[post_process.system]")
+    end = _DEFAULT_PROMPTS_TOML.index("[post_process.user]")
+    text = _DEFAULT_PROMPTS_TOML[:start] + _DEFAULT_PROMPTS_TOML[end:]
+    assert "[post_process.system]" not in text
+    if user_template is not None:
+        text = text.replace('template = "{{text}}"', f'template = """{user_template}"""')
+    return text
+
+
 def test_default_translate_clause_is_hardened():
     """The embedded default uses the sister project's #56 hardened translate clause."""
     import tomllib
@@ -416,6 +427,42 @@ def test_load_prompts_upgrades_keyboard_era_system_in_memory(monkeypatch, tmp_pa
     assert prompts_file.read_text() == legacy
     assert "Your output may equal the input." in data["post_process"]["system"]["prompt"]
     assert "Summarize briefly, my way." in data["summary"]["user"]["template"]
+
+
+def test_load_prompts_seeds_missing_system_table(monkeypatch, tmp_path):
+    """A file without [post_process.system] is repaired instead of aborting in validation."""
+    import main
+    prompts_file = tmp_path / "prompts.toml"
+    prompts_file.write_text(_pre_system_table_prompts_toml())
+    monkeypatch.setattr(main, "PROMPTS_CONFIG", prompts_file)
+    monkeypatch.setattr(main, "CONFIG_DIR", tmp_path)
+    data = _load_prompts()
+    assert _INJECTION_GUARD_LINE in data["post_process"]["system"]["prompt"]
+    assert "[post_process.system]" in prompts_file.read_text()
+
+
+def test_seeding_missing_prompt_keys_preserves_customizations(monkeypatch, tmp_path):
+    """Seeding adds only what is absent: a customized user template stays byte-identical."""
+    import main
+    custom = "My own template.\n\n---\n\n{{text}}\n"
+    prompts_file = tmp_path / "prompts.toml"
+    prompts_file.write_text(_pre_system_table_prompts_toml(custom))
+    monkeypatch.setattr(main, "PROMPTS_CONFIG", prompts_file)
+    monkeypatch.setattr(main, "CONFIG_DIR", tmp_path)
+    data = _load_prompts()
+    assert data["post_process"]["user"]["template"] == custom
+    assert "My own template." in prompts_file.read_text()
+    assert main._seed_missing_prompt_keys() == []
+
+
+def test_conftest_isolates_the_suite_from_the_real_user_config():
+    """The suite must never read or write ~/.config/aitranscribe (see tests/conftest.py)."""
+    import main
+    real = Path.home() / ".config" / "aitranscribe"
+    assert main.CONFIG_DIR != real
+    assert "aitranscribe-test-config-" in str(main.CONFIG_DIR)
+    assert main.PROMPTS_CONFIG.parent == main.CONFIG_DIR
+    assert main.CONFIG_FILE.parent == main.CONFIG_DIR
 
 
 def test_build_summary_messages():
