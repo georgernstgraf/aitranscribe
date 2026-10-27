@@ -22,7 +22,7 @@ from tui import (
     resolve_input_device,
 )
 from textual.containers import Vertical
-from textual.widgets import Input, OptionList, Static, TextArea
+from textual.widgets import Input, OptionList, Select, Static, TextArea
 
 
 def test_get_clipboard_command_prefers_wl_copy_on_wayland():
@@ -1727,3 +1727,69 @@ async def test_finish_recording_names_device_when_no_audio_arrives():
         assert app.is_recording is False
         assert app.status_text == "No audio from input device 'OBSBOT Meet SE'."
         assert app.latest_transcript == "No audio recorded from 'OBSBOT Meet SE'."
+
+
+# --- provider selection (config schema v2) ---
+
+
+def _provider_app(persisted: list[tuple[str, object]], **overrides):
+    prompt_manager = Mock()
+    prompt_manager.count_prompts.return_value = 0
+    prompt_manager.recent_prompts.return_value = []
+    kwargs = dict(
+        prompt_manager=prompt_manager,
+        process_audio=Mock(),
+        process_file=Mock(),
+        stt_provider_name="selfhosted-1",
+        llm_provider_name="groq",
+        default_stt_model="large-v3",
+        default_llm_model="gpt-oss-120b",
+        initial_settings={
+            "pre_process_mode": "raw",
+            "input_source": "microphone",
+            "stt_provider": "selfhosted-1",
+            "llm_provider": "groq",
+            "stt_providers": {"groq": "whisper-large-v3", "selfhosted-1": "large-v3"},
+            "llm_providers": {"groq": "gpt-oss-120b"},
+        },
+        persist_setting=lambda name, value: persisted.append((name, value)),
+    )
+    kwargs.update(overrides)
+    return AitranscribeTUI(**kwargs)
+
+
+@pytest.mark.anyio
+async def test_stt_provider_select_swaps_model_and_persists():
+    """Choosing another STT profile also swaps that profile's model."""
+    persisted: list[tuple[str, object]] = []
+    app = _provider_app(persisted)
+
+    async with app.run_test() as pilot:
+        app.query_one("#stt_provider", Select).value = "groq"
+        await pilot.pause()
+        assert app.query_one("#stt_model", Input).value == "whisper-large-v3"
+
+    assert ("stt_provider", "groq") in persisted
+    # The model swap is not persisted as an edit of its own.
+    assert not [name for name, _ in persisted if name == "stt_model"]
+
+
+@pytest.mark.anyio
+async def test_llm_provider_select_updates_model():
+    persisted: list[tuple[str, object]] = []
+    app = _provider_app(persisted)
+
+    async with app.run_test() as pilot:
+        app.query_one("#llm_provider", Select).value = "groq"
+        await pilot.pause()
+
+    # Only one LLM profile in this setup: no change, therefore no write.
+    assert persisted == []
+
+
+@pytest.mark.anyio
+async def test_provider_selects_render_current_selection():
+    app = _provider_app([])
+    async with app.run_test():
+        assert app.query_one("#stt_provider", Select).value == "selfhosted-1"
+        assert app.query_one("#llm_provider", Select).value == "groq"

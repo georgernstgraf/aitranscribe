@@ -1,0 +1,59 @@
+# aitranscribe configuration — TOML, schema version 2
+#
+# Scope tables hold the selector only; everything about an endpoint
+# (base_url, keys, model, chunk limits) lives in its profile table.
+# Precedence for keys: api_key_env (environment) before api_key (this file).
+# This file is written by the TUI for user-adjustable settings; hand edits
+# keep their comments and formatting.
+
+version = 2
+
+# ── Speech-to-Text ──────────────────────────────────────────────
+[stt]
+provider = "groq"
+
+[stt.providers.groq]
+description = "Groq Cloud (US free tier); keys: console.groq.com"
+base_url = "https://api.groq.com/openai/v1"
+api_key = "your_groq_api_key_here"
+model = "whisper-large-v3-turbo"
+max_upload_s = 120
+max_upload_mb = 25
+
+# Example: a self-hosted, OpenAI-compatible endpoint (e.g. Whisper on your own
+# GPU). Uncomment the table, set base_url/api_key, then point [stt].provider at
+# it. Self-hosted servers have no >120 s defect, so the chunk ceiling can rise.
+#
+# [stt.providers.selfhosted-1]
+# description   = "Whisper large-v3 on my own GPU"
+# base_url      = "http://localhost:9000/v1"
+# api_key       = "…"
+# model         = "large-v3"
+# max_upload_s  = 900
+# max_upload_mb = 100
+
+# ── LLM post-processing ─────────────────────────────────────────
+[llm]
+provider = "openrouter"
+
+[llm.providers.openrouter]
+description = "OpenRouter (default LLM provider)"
+base_url = "https://openrouter.ai/api/v1"
+api_key = "your_openrouter_api_key_here"
+model = "anthropic/claude-3-haiku"
+
+[llm.providers.groq]
+description = "Groq Cloud; also usable for STT"
+base_url = "https://api.groq.com/openai/v1"
+api_key = "your_groq_api_key_here"
+model = "llama-3.3-70b-versatile"
+
+# ── UI / runtime ────────────────────────────────────────────────
+[ui]
+pre_process_mode = "english"
+output_width = 80
+verbose_errors = false
+last_file_path = ""
+
+[paths]
+prompts_file = "/home/you/.config/aitranscribe/prompts.sqlite"

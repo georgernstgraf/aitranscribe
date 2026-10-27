@@ -10,6 +10,8 @@ import sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
+import config
+
 # We import the main app. If dependencies like typer are missing,
 # this import will fail immediately, thus failing the test suite.
 try:
@@ -137,9 +139,31 @@ def test_llm_model_option():
     option = llm_model_option()
     assert isinstance(option, typer.models.OptionInfo)
 
+def _endpoint(scope: str, name: str, model: str = "m", keys: tuple[str, ...] = ("k",)) -> config.Endpoint:
+    return config.Endpoint(
+        name=name,
+        scope=scope,
+        base_url=f"https://{name}.test/v1",
+        model=model,
+        api_keys=keys,
+        key_sources=tuple("file" for _ in keys),
+    )
+
+
+def _fake_app_config(ui: dict | None = None) -> config.AppConfig:
+    return config.AppConfig(
+        path=Path("/nonexistent/config.toml"),
+        stt=config.Scope("stt", "groq", {"groq": _endpoint("stt", "groq", "whisper")}),
+        llm=config.Scope("llm", "groq", {"groq": _endpoint("llm", "groq", "gpt")}),
+        ui=ui or {},
+        paths={},
+    )
+
+
 _INIT_GLOBALS = (
     "PROMPTS", "stt_client", "llm_client", "prompt_manager", "_initialized",
-    "GROQ_API_KEY", "GROQ_STT_MODEL", "LLM_PROVIDER", "LLM_MODEL",
+    "CONFIG", "STT_ENDPOINT", "LLM_ENDPOINT", "STT_PROVIDER", "LLM_PROVIDER",
+    "STT_MODEL", "LLM_MODEL",
     "PROMPTS_FILE", "DEFAULT_PRE_PROCESS_MODE", "DEFAULT_VERBOSE_ERRORS",
 )
 
@@ -149,14 +173,13 @@ def test_init_app_is_idempotent(monkeypatch):
     monkeypatch.setattr(main, "_initialized", False)
     for name in _INIT_GLOBALS:
         monkeypatch.setattr(main, name, getattr(main, name), raising=True)
-    with patch.object(main, "_create_default_config") as mock_create, \
-         patch.object(main, "_migrate_config") as mock_migrate, \
-         patch("main.load_dotenv"), \
+    fake_config = _fake_app_config()
+    with patch.object(main, "_load_app_config", return_value=fake_config) as mock_load, \
          patch("main._load_prompts", return_value={}), \
          patch("main.PromptManager"):
         main.init_app()
         main.init_app()
-    assert mock_create.call_count + mock_migrate.call_count == 1
+    assert mock_load.call_count == 1
 
 def test_import_does_not_initialize_state():
     """A fresh import of main must leave init-state unset until init_app() runs."""
@@ -444,10 +467,16 @@ def test_get_recording_file_paths_uses_three_digits():
 
 def test_get_tui_settings_defaults_to_english_and_microphone(tmp_path):
     """TUI settings load from config; input_source is always microphone."""
-    config_file = tmp_path / "aitranscribe.conf"
-    config_file.write_text('PRE_PROCESS_MODE="english"\nVERBOSE_ERRORS="false"\n')
+    config_file = tmp_path / "config.toml"
+    config_file.write_text(
+        'version = 2\n\n[stt]\nprovider = "groq"\n\n'
+        '[stt.providers.groq]\napi_key = "k"\nmodel = "whisper"\n\n'
+        '[llm]\nprovider = "groq"\n\n'
+        '[llm.providers.groq]\napi_key = "k"\nmodel = "gpt"\n\n'
+        '[ui]\npre_process_mode = "english"\nverbose_errors = false\n'
+    )
 
-    with patch("main.CONFIG_FILE", config_file), patch("main.GROQ_STT_MODEL", "whisper"), patch("main.LLM_MODEL", "gpt"):
+    with patch("main.CONFIG_FILE", config_file):
         settings = get_tui_settings()
 
     assert settings["pre_process_mode"] == "english"
@@ -457,10 +486,10 @@ def test_get_tui_settings_defaults_to_english_and_microphone(tmp_path):
 
 def test_get_tui_settings_always_starts_microphone(tmp_path):
     """Recording mode is session-only: even a stale persisted source is ignored."""
-    config_file = tmp_path / "aitranscribe.conf"
-    config_file.write_text('TRANSCRIBE_SOURCE="file"\n')
+    config_file = tmp_path / "config.toml"
+    config.create_default(config_file)
 
-    with patch("main.CONFIG_FILE", config_file), patch("main.GROQ_STT_MODEL", "whisper"), patch("main.LLM_MODEL", "gpt"):
+    with patch("main.CONFIG_FILE", config_file):
         settings = get_tui_settings()
 
     assert settings["input_source"] == "microphone"
@@ -479,50 +508,112 @@ def test_normalize_output_width():
 
 
 def test_get_tui_settings_includes_output_width(tmp_path):
-    """OUTPUT_WIDTH from the config is exposed to the TUI."""
-    config_file = tmp_path / "aitranscribe.conf"
-    config_file.write_text('OUTPUT_WIDTH="120"\n')
+    """output_width from the [ui] table is exposed to the TUI."""
+    config_file = tmp_path / "config.toml"
+    config.create_default(config_file)
+    config.set_value(config_file, "ui", "output_width", value=120)
 
-    with patch("main.CONFIG_FILE", config_file), patch("main.GROQ_STT_MODEL", "whisper"), patch("main.LLM_MODEL", "gpt"):
+    with patch("main.CONFIG_FILE", config_file):
         settings = get_tui_settings()
 
     assert settings["output_width"] == 120
 
 
 def test_get_tui_settings_defaults_output_width(tmp_path):
-    """Missing OUTPUT_WIDTH falls back to the 80-char default."""
-    config_file = tmp_path / "aitranscribe.conf"
-    config_file.write_text("")
+    """Missing output_width falls back to the 80-char default."""
+    config_file = tmp_path / "config.toml"
+    config.create_default(config_file)
 
-    with patch("main.CONFIG_FILE", config_file), patch("main.GROQ_STT_MODEL", "whisper"), patch("main.LLM_MODEL", "gpt"):
+    with patch("main.CONFIG_FILE", config_file):
         settings = get_tui_settings()
 
     assert settings["output_width"] == 80
 
 
+def test_get_tui_settings_exposes_provider_selection(tmp_path):
+    """Both providers and their per-profile models reach the TUI."""
+    config_file = tmp_path / "config.toml"
+    config_file.write_text(
+        'version = 2\n\n[stt]\nprovider = "selfhosted-1"\n\n'
+        '[stt.providers.selfhosted-1]\nbase_url = "https://w.test/v1"\napi_key = "k"\nmodel = "large-v3"\n\n'
+        '[stt.providers.groq]\napi_key = "k"\nmodel = "whisper-large-v3"\n\n'
+        '[llm]\nprovider = "groq"\n\n'
+        '[llm.providers.groq]\napi_key = "k"\nmodel = "gpt-oss"\n'
+    )
+
+    with patch("main.CONFIG_FILE", config_file):
+        settings = get_tui_settings()
+
+    assert settings["stt_provider"] == "selfhosted-1"
+    assert settings["stt_model"] == "large-v3"
+    assert settings["stt_providers"] == {"groq": "whisper-large-v3", "selfhosted-1": "large-v3"}
+    assert settings["llm_providers"] == {"groq": "gpt-oss"}
+
+
 def test_create_default_config_includes_output_width(tmp_path):
-    """The generated config documents OUTPUT_WIDTH."""
+    """The generated config documents output_width and the schema version."""
     import main
 
-    config_file = tmp_path / "aitranscribe.conf"
+    config_file = tmp_path / "config.toml"
     with patch.object(main, "CONFIG_FILE", config_file), patch.object(main, "CONFIG_DIR", tmp_path):
         main._create_default_config()
 
-    assert 'OUTPUT_WIDTH="80"' in config_file.read_text()
+    text = config_file.read_text()
+    assert "version = 2" in text
+    assert "output_width = 80" in text
+    assert "[stt.providers" in text
 
 
 def test_persist_tui_setting_output_width():
-    """Persisting the width updates OUTPUT_WIDTH and writes OUTPUT_WIDTH."""
+    """Persisting the width updates OUTPUT_WIDTH and writes [ui].output_width."""
     import main
 
     original = main.OUTPUT_WIDTH
     try:
-        with patch("main.persist_config_value") as mock_persist:
+        with patch("main.config.set_value") as mock_set:
             main.persist_tui_setting("output_width", 120)
-        mock_persist.assert_called_once_with("OUTPUT_WIDTH", "120")
+        mock_set.assert_called_once_with(main.CONFIG_FILE, "ui", "output_width", value=120)
         assert main.OUTPUT_WIDTH == 120
     finally:
         main.OUTPUT_WIDTH = original
+
+
+def test_persist_tui_setting_stt_model_writes_active_profile(tmp_path):
+    """A model edit lands in the active profile, never in a scope-level override."""
+    import main
+
+    config_file = tmp_path / "config.toml"
+    config_file.write_text(
+        'version = 2\n\n[stt]\nprovider = "selfhosted-1"\n\n'
+        '[stt.providers.selfhosted-1]\nbase_url = "https://w.test/v1"\napi_key = "k"\nmodel = "large-v3"\n\n'
+        '[llm]\nprovider = "groq"\n\n[llm.providers.groq]\napi_key = "k"\nmodel = "gpt"\n'
+    )
+    with patch.object(main, "CONFIG_FILE", config_file), \
+         patch.object(main, "CONFIG", config.load(config_file)), \
+         patch.object(main, "STT_MODEL", "large-v3"), \
+         patch.object(main, "_apply_app_config"):
+        main.persist_tui_setting("stt_model", "turbo")
+
+    assert config.load(config_file).stt.active().model == "turbo"
+    assert "model = \"turbo\"" in config_file.read_text()
+
+
+def test_persist_tui_setting_provider_switch_keeps_comments(tmp_path):
+    """Switching providers rewrites only the selector and preserves comments."""
+    import main
+
+    config_file = tmp_path / "config.toml"
+    config.create_default(config_file)
+    text_before = config_file.read_text()
+    with patch.object(main, "CONFIG_FILE", config_file), \
+         patch.object(main, "CONFIG", config.load(config_file)), \
+         patch.object(main, "_apply_app_config"):
+        main.persist_tui_setting("stt_provider", "groq")
+
+    text_after = config_file.read_text()
+    assert "# aitranscribe configuration" in text_after
+    assert len(text_after.splitlines()) >= len(text_before.splitlines()) - 2
+    assert config.load(config_file).stt.provider == "groq"
 
 def test_validate_api_keys_with_stt_client_none():
     """Test that validate_api_keys fails when stt_client is None."""
@@ -558,11 +649,12 @@ def test_require_stt_client_returns_client():
 
 def test_require_stt_client_raises_when_missing():
     """Test that require_stt_client raises RuntimeError with a clear message when stt_client is None."""
-    with patch('main.stt_client', None):
+    with patch('main.stt_client', None), \
+         patch('main.STT_ENDPOINT', _endpoint("stt", "groq", keys=())):
         with pytest.raises(RuntimeError) as exc_info:
             require_stt_client()
         assert exc_info.value.args[0] == stt_missing_message()
-        assert "GROQ_API_KEY" in exc_info.value.args[0]
+        assert "STT profile 'groq' has no API key" in exc_info.value.args[0]
 
 def test_require_llm_client_returns_client():
     """Test that require_llm_client returns the client when set."""
@@ -572,11 +664,12 @@ def test_require_llm_client_returns_client():
 
 def test_require_llm_client_raises_when_missing():
     """Test that require_llm_client raises RuntimeError with a clear message when llm_client is None."""
-    with patch('main.llm_client', None):
+    with patch('main.llm_client', None), \
+         patch('main.LLM_ENDPOINT', _endpoint("llm", "groq", keys=())):
         with pytest.raises(RuntimeError) as exc_info:
             require_llm_client()
         assert exc_info.value.args[0] == llm_missing_message()
-        assert "API key" in exc_info.value.args[0]
+        assert "LLM profile 'groq' has no API key" in exc_info.value.args[0]
 
 # --- terminal title (issue #67) ---
 
@@ -698,7 +791,7 @@ def test_process_file_for_tui_raw_mode_bypasses_llm(tmp_path):
          patch.object(main, "stt_client", object()), \
          patch.object(main, "llm_client", None), \
          patch("main.require_stt_client", return_value=MagicMock()), \
-         patch("main.chunk_audio", side_effect=lambda f: [f]), \
+         patch("main.chunk_audio", side_effect=lambda f, **kw: [f]), \
          patch("main.transcribe_audio", return_value=("raw words", "german")), \
          patch("main.process_with_llm") as mock_llm, \
          patch("main.require_llm_client", side_effect=AssertionError("LLM must not be required in raw mode")):
@@ -750,7 +843,7 @@ def test_process_file_for_tui_accepts_quoted_path(tmp_path, quote):
     fake_manager.add_prompt.return_value = 7
     with patch.object(main, "prompt_manager", fake_manager), \
          patch.object(main, "stt_client", object()), \
-         patch("main.chunk_audio", side_effect=lambda f: [f]), \
+         patch("main.chunk_audio", side_effect=lambda f, **kw: [f]), \
          patch("main.transcribe_audio", return_value=("raw words", None)):
         result = main.process_file_for_tui(f" {quote}{src}{quote} ", settings)
 
@@ -777,7 +870,7 @@ def test_process_file_for_tui_english_mode_uses_llm(tmp_path):
          patch.object(main, "llm_client", object()), \
          patch("main.require_stt_client", return_value=MagicMock()), \
          patch("main.require_llm_client", return_value=MagicMock()), \
-         patch("main.chunk_audio", side_effect=lambda f: [f]), \
+         patch("main.chunk_audio", side_effect=lambda f, **kw: [f]), \
          patch("main.transcribe_audio", return_value=("raw words", "german")), \
          patch("main.process_with_llm", return_value="polished") as mock_llm:
         result = main.process_file_for_tui(str(src), settings)
@@ -1121,43 +1214,6 @@ def test_promptmanager_errors_propagate_not_swallowed():
     finally:
         temp_file.unlink()
 
-def test_migrate_config_ignores_commented_keys():
-    """Issue #72 #11: a commented-out key must not count as present."""
-    import main
-    with tempfile.TemporaryDirectory() as tmp_dir:
-        config_file = Path(tmp_dir) / "aitranscribe.conf"
-        config_file.write_text('# GROQ_API_KEY="commented_out"\n')
-        with patch.object(main, "CONFIG_FILE", config_file):
-            main._migrate_config()
-        text = config_file.read_text()
-    # The commented line is ignored; the real key was appended
-    assert 'GROQ_API_KEY="your_groq_api_key_here"' in text
-    assert 'LLM_PROVIDER="openrouter"' in text
-    assert 'PRE_PROCESS_MODE="english"' in text
-
-def test_migrate_config_noop_when_all_keys_present():
-    """Issue #72 #11: nothing is appended when every key exists (commented or not)."""
-    import main
-    with tempfile.TemporaryDirectory() as tmp_dir:
-        config_file = Path(tmp_dir) / "aitranscribe.conf"
-        content = "\n".join(f'{key}="x"' for key, _ in main._MIGRATION_BLOCKS)
-        config_file.write_text(content)
-        with patch.object(main, "CONFIG_FILE", config_file):
-            main._migrate_config()
-        assert config_file.read_text() == content
-
-def test_migrate_config_single_write():
-    """Issue #72 #11: all missing blocks are appended in one write."""
-    import main
-    with tempfile.TemporaryDirectory() as tmp_dir:
-        config_file = Path(tmp_dir) / "aitranscribe.conf"
-        config_file.write_text("")
-        with patch.object(main, "CONFIG_FILE", config_file), \
-             patch("builtins.open", wraps=open) as mock_open:
-            main._migrate_config()
-    appends = [c for c in mock_open.call_args_list if c.kwargs.get("mode") == "a" or (c.args and len(c.args) > 1 and c.args[1] == "a")]
-    assert len(appends) == 1
-
 # ==================== Integration Tests ====================
 
 def test_cli_query_prompt_with_content():
@@ -1453,3 +1509,147 @@ def test_record_from_microphone_returns_early_when_capture_cancelled():
     mock_paths.assert_not_called()
     mock_write.assert_not_called()
     mock_pipeline.assert_not_called()
+
+
+# --- profile-based configuration (schema v2) ---
+
+MIXED_CONFIG = """\
+version = 2
+
+[stt]
+provider = "selfhosted-1"
+
+[stt.providers.selfhosted-1]
+description = "Whisper on the school GPU"
+base_url = "https://whisper.test/v1"
+api_key = "whisper-key"
+model = "large-v3"
+max_upload_s = 900
+max_upload_mb = 100
+
+[stt.providers.groq]
+api_key = "groq-key"
+model = "whisper-large-v3"
+max_upload_s = 120
+max_upload_mb = 25
+
+[llm]
+provider = "groq"
+
+[llm.providers.groq]
+api_key = "groq-llm-key"
+model = "openai/gpt-oss-120b"
+"""
+
+
+def test_apply_app_config_keeps_stt_and_llm_independent(tmp_path):
+    """The owner's setup: STT on a self-hosted server, LLM in the cloud."""
+    import main
+
+    config_file = tmp_path / "config.toml"
+    config_file.write_text(MIXED_CONFIG)
+    saved = {name: getattr(main, name) for name in _INIT_GLOBALS}
+    try:
+        main._apply_app_config(config.load(config_file))
+
+        assert main.STT_PROVIDER == "selfhosted-1"
+        assert main.STT_MODEL == "large-v3"
+        assert main.LLM_PROVIDER == "groq"
+        assert main.LLM_MODEL == "openai/gpt-oss-120b"
+        # Key isolation: each client carries only its own profile's key/URL.
+        assert main.stt_client.api_key == "whisper-key"
+        assert str(main.stt_client.base_url).rstrip("/") == "https://whisper.test/v1"
+        assert main.llm_client.api_key == "groq-llm-key"
+        assert str(main.llm_client.base_url).rstrip("/") == "https://api.groq.com/openai/v1"
+    finally:
+        for name, value in saved.items():
+            setattr(main, name, value)
+
+
+def test_profiles_without_key_yield_no_client(tmp_path):
+    """A missing key must produce None, never a client with another profile's key."""
+    import main
+
+    config_file = tmp_path / "config.toml"
+    config_file.write_text(
+        'version = 2\n\n[stt]\nprovider = "mine"\n\n'
+        '[stt.providers.mine]\nbase_url = "https://a/v1"\nmodel = "m"\n'
+    )
+    cfg = config.load(config_file)
+    assert main._build_client(cfg.stt.active()) is None
+
+
+def test_chunk_with_active_profile_uses_profile_limits():
+    """Chunk ceilings come from the active STT profile, not a global constant."""
+    import main
+
+    endpoint = _endpoint("stt", "selfhosted-1")
+    endpoint = config.Endpoint(
+        name="selfhosted-1", scope="stt", base_url="https://w/v1", model="large-v3",
+        api_keys=("k",), max_upload_s=900, max_upload_mb=100,
+    )
+    with patch.object(main, "STT_ENDPOINT", endpoint), \
+         patch("main.chunk_audio", return_value=["c"]) as mock_chunk:
+        assert main._chunk_with_active_profile("a.mp3") == ["c"]
+
+    mock_chunk.assert_called_once_with("a.mp3", max_size_mb=100, max_duration_s=900)
+
+
+def test_config_show_masks_keys(tmp_path):
+    """`config show` prints the active profiles without leaking full keys."""
+    config_file = tmp_path / "config.toml"
+    config_file.write_text(MIXED_CONFIG)
+    with patch("main.CONFIG_FILE", config_file):
+        result = runner.invoke(app, ["config", "show"])
+
+    assert result.exit_code == 0
+    assert "selfhosted-1" in result.stdout
+    assert "whisper-key" not in result.stdout
+    assert "whis…-key" in result.stdout or "whis…" in result.stdout
+
+
+def test_config_show_reveal_prints_full_key(tmp_path):
+    config_file = tmp_path / "config.toml"
+    config_file.write_text(MIXED_CONFIG)
+    with patch("main.CONFIG_FILE", config_file):
+        result = runner.invoke(app, ["config", "show", "--reveal"])
+
+    assert result.exit_code == 0
+    assert "whisper-key" in result.stdout
+
+
+def test_config_check_fails_without_key(tmp_path):
+    config_file = tmp_path / "config.toml"
+    config_file.write_text(
+        'version = 2\n\n[stt]\nprovider = "mine"\n\n'
+        '[stt.providers.mine]\nbase_url = "https://a/v1"\nmodel = "m"\n'
+    )
+    with patch("main.CONFIG_FILE", config_file):
+        result = runner.invoke(app, ["config", "check"])
+
+    assert result.exit_code == 1
+    assert "no API key" in result.stdout
+
+
+def test_config_check_passes_for_complete_profiles(tmp_path):
+    config_file = tmp_path / "config.toml"
+    config_file.write_text(MIXED_CONFIG)
+    with patch("main.CONFIG_FILE", config_file):
+        result = runner.invoke(app, ["config", "check"])
+
+    assert result.exit_code == 0
+    assert "[stt] selfhosted-1" in result.stdout
+    assert "[llm] groq" in result.stdout
+
+
+def test_config_migrate_creates_toml_from_legacy(tmp_path):
+    legacy = tmp_path / "aitranscribe.conf"
+    legacy.write_text('GROQ_API_KEY="gsk_x"\nLLM_PROVIDER="groq"\nGROQ_LLM_MODEL="m"\n')
+    config_file = tmp_path / "config.toml"
+    with patch("main.CONFIG_FILE", config_file), patch("main.LEGACY_CONFIG_FILE", legacy):
+        result = runner.invoke(app, ["config", "migrate"])
+
+    assert result.exit_code == 0
+    assert config_file.exists()
+    assert "gsk_x" in config_file.read_text()
+    assert not legacy.exists()

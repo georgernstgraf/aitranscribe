@@ -18,7 +18,7 @@ from textual.screen import ModalScreen
 from textual.containers import Horizontal, Vertical
 from textual.events import Resize
 from textual.message import Message
-from textual.widgets import Button, Footer, Header, Input, Label, OptionList, RadioButton, RadioSet, Static, TextArea
+from textual.widgets import Button, Footer, Header, Input, Label, OptionList, RadioButton, RadioSet, Select, Static, TextArea
 from textual.widgets.option_list import Option, OptionDoesNotExist
 
 
@@ -615,6 +615,15 @@ class AitranscribeTUI(App[None]):
         self.default_stt_model = default_stt_model
         self.default_llm_model = default_llm_model
         self.initial_settings = initial_settings or {}
+        # Provider id -> its model, so switching a provider also swaps the model.
+        self.stt_providers = dict(
+            self.initial_settings.get("stt_providers") or {stt_provider_name: default_stt_model}
+        )
+        self.llm_providers = dict(
+            self.initial_settings.get("llm_providers") or {llm_provider_name: default_llm_model}
+        )
+        self.stt_provider = str(self.initial_settings.get("stt_provider") or stt_provider_name)
+        self.llm_provider = str(self.initial_settings.get("llm_provider") or llm_provider_name)
         self.recorder = RecordingController()
         self.is_recording = False
         self.is_paused = False
@@ -729,8 +738,26 @@ class AitranscribeTUI(App[None]):
                         yield RadioButton("Cleanup + Translate to English", id="mode-english", value=self.pre_process_mode == "english")
                 with Vertical(id="extra_panel", classes="panel"):
                     with Horizontal(classes="field_row"):
+                        yield Label("STT")
+                        yield Select(
+                            [(name, name) for name in self.stt_providers],
+                            value=self.stt_provider,
+                            allow_blank=False,
+                            compact=True,
+                            id="stt_provider",
+                        )
+                    with Horizontal(classes="field_row"):
                         yield Label("STT-Model")
                         yield PersistInput(value=self.default_stt_model, placeholder=f"{self.stt_provider_name} model", id="stt_model")
+                    with Horizontal(classes="field_row"):
+                        yield Label("LLM")
+                        yield Select(
+                            [(name, name) for name in self.llm_providers],
+                            value=self.llm_provider,
+                            allow_blank=False,
+                            compact=True,
+                            id="llm_provider",
+                        )
                     with Horizontal(classes="field_row"):
                         yield Label("LLM-Model")
                         yield PersistInput(value=self.default_llm_model, placeholder=f"{self.llm_provider_name} model", id="llm_model")
@@ -1456,6 +1483,31 @@ class AitranscribeTUI(App[None]):
             self.persist_setting_value("output_width", self.output_width)
             self.refresh_transcript()
             self.action_enter_command_mode()
+
+    def on_select_changed(self, event: Select.Changed) -> None:
+        """Switching a provider also switches its model and persists the choice."""
+        if not isinstance(event.value, str) or not event.value:
+            return
+        if event.select.id == "stt_provider":
+            if event.value == self.stt_provider:
+                return
+            self.stt_provider = event.value
+            self.stt_provider_name = event.value
+            self.default_stt_model = self.stt_providers.get(event.value, self.default_stt_model)
+            self.query_one("#stt_model", Input).value = self.default_stt_model
+            self._dirty_inputs.discard("stt_model")
+            self.persist_setting_value("stt_provider", event.value)
+            self.set_status_message(f"STT provider: {event.value} ({self.default_stt_model})")
+        elif event.select.id == "llm_provider":
+            if event.value == self.llm_provider:
+                return
+            self.llm_provider = event.value
+            self.llm_provider_name = event.value
+            self.default_llm_model = self.llm_providers.get(event.value, self.default_llm_model)
+            self.query_one("#llm_model", Input).value = self.default_llm_model
+            self._dirty_inputs.discard("llm_model")
+            self.persist_setting_value("llm_provider", event.value)
+            self.set_status_message(f"LLM provider: {event.value} ({self.default_llm_model})")
 
     def on_input_changed(self, event: Input.Changed) -> None:
         # Persisting happens on submit/blur (issue #72 #12), not per keystroke.

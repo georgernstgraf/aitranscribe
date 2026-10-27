@@ -10,7 +10,7 @@ Follow these without question. Do not deviate unless explicitly told.
 - Keep user-facing labels for preprocessing modes identical between the `Recording Mode` radio buttons and README/help text.
 
 ## File Layout
-- Keep the `Textual` UI in `tui.py` and keep API, recording, and persistence helpers in `main.py` until a larger refactor is requested.
+- Keep the `Textual` UI in `tui.py`, the configuration schema in `config.py`, and API/recording/persistence helpers in `main.py` until a larger refactor is requested.
 
 ## Initialization
 - `main.py` import must stay side-effect-free. All setup (config create/migrate, `load_dotenv`, env constants, `PROMPTS`, OpenAI clients, `prompt_manager`) lives in the idempotent `init_app()`; `main()` calls it before any logic. Never add new module-level side effects.
@@ -59,9 +59,16 @@ Follow these without question. Do not deviate unless explicitly told.
 - Windows-only DLL path additions (`os.add_dll_directory`) are exempt — they are expected failures on non-Windows.
 
 ## Config
-- Config migration matches keys via `dotenv_values` (comments ignored), never via substring search on file text — a commented-out `# KEY=...` line must not count as present.
-- Migration additions are appended in a single write using the `_MIGRATION_BLOCKS` table in `main.py`.
+- The config file is TOML (`~/.config/aitranscribe/config.toml`, schema `version = 2`) and lives in `config.py`; `main.py` never parses it directly. All schema, key resolution, migration and writing logic belongs in `config.py`.
+- **A scope table (`[stt]`, `[llm]`) holds the selector only** (`provider = "<profile>"`). Everything about an endpoint — `base_url`, keys, model, chunk limits — lives in `[<scope>.providers.<name>]`. Never add a scope-level override for a profile field (the old `STT_MODEL` override is gone on purpose): a second value for the same thing is how the dotenv file became unmaintainable. Ad-hoc overrides are CLI flags (`--stt-model`).
+- **One value, one place.** The model belongs to the profile, so switching providers switches the model with it. New settings that describe an endpoint go into the profile table.
+- **STT and LLM never share credentials.** Build each client from its own `Endpoint` via `_build_client()`; do not reintroduce a shared `GROQ_API_KEY`-style variable that serves both scopes.
+- **Chunk ceilings are per profile** (`max_upload_s`, `max_upload_mb`). `chunk_audio()` is called through `main._chunk_with_active_profile()`; never reintroduce a global `GROQ_MAX_UPLOAD_S` for the upload path (Groq needs 120 s, self-hosted endpoints do not).
+- Unknown `provider` values are a hard `ConfigError` listing available profiles. No silent fallback to a default provider.
+- Writes go through `config.set_value()` (tomlkit), which preserves comments and layout; never `json`/`toml`-dump the whole document for a single setting.
+- Migration is one-way and one-shot: `config.migrate_if_needed()` only runs when `config.toml` is missing, writes the TOML file, and moves the legacy file to `aitranscribe.conf.bak-<timestamp>`. Never resurrect append-on-start migrations.
 - TUI inputs (`PersistInput`) persist to config on blur or Enter (submit), never per keystroke; `Input.Changed` only marks inputs dirty.
+- Provider switches persist only `[<scope>].provider`; the model input is refilled from the new profile and the auto-refill must not be persisted as a model edit (`_dirty_inputs.discard`).
 - `typer.Exit` inherits from `Exception` — never wrap CLI exit-raising blocks in `except Exception`; catch the specific error type (e.g. `sqlite3.Error`).
 
 ## Testing

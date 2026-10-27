@@ -3,6 +3,7 @@ import time
 import os
 import re
 import shutil
+import subprocess
 import textwrap
 import tomllib
 import copy
@@ -15,52 +16,13 @@ from pathlib import Path
 from typing import Any, Callable
 from rich.console import Console
 from rich.progress import Progress, TextColumn
-from dotenv import dotenv_values, load_dotenv, set_key
 from openai import OpenAI
 from pynput import keyboard
+import config
 from core import MAX_AUDIO_SIZE_MB, chunk_audio, transcribe_audio, process_with_llm, compress_audio
 
 console = Console(highlight=False, color_system=None)
 state = {"verbose": False}
-
-LLM_PROVIDERS = {
-    "openrouter": {
-        "base_url": "https://openrouter.ai/api/v1",
-        "env_key": "OPENROUTER_API_KEY",
-        "env_model": "OPENROUTER_LLM_MODEL",
-        "default_model": "anthropic/claude-3-haiku",
-    },
-    "cohere": {
-        "base_url": "https://api.cohere.ai/compatibility/v1",
-        "env_key": "COHERE_API_KEY",
-        "env_model": "COHERE_LLM_MODEL",
-        "default_model": "command-r",
-    },
-    "z.ai": {
-        "base_url": "https://api.z.ai/api/coding/paas/v4",
-        "env_key": "ZAI_API_KEY",
-        "env_model": "ZAI_LLM_MODEL",
-        "default_model": "glm-5",
-    },
-    "google": {
-        "base_url": "https://generativelanguage.googleapis.com/v1beta/openai/",
-        "env_key": "GOOGLE_API_KEY",
-        "env_model": "GOOGLE_LLM_MODEL",
-        "default_model": "gemini-2.0-flash",
-    },
-    "groq": {
-        "base_url": "https://api.groq.com/openai/v1",
-        "env_key": "GROQ_API_KEY",
-        "env_model": "GROQ_LLM_MODEL",
-        "default_model": "llama-3.3-70b-versatile",
-    },
-    "cortecs": {
-        "base_url": "https://api.cortecs.ai/v1",
-        "env_key": "CORTECS_API_KEY",
-        "env_model": "CORTECS_LLM_MODEL",
-        "default_model": "qwen3.8-flash-next",
-    },
-}
 
 if os.name == 'nt':
     appdata = os.getenv('APPDATA')
@@ -71,71 +33,36 @@ if os.name == 'nt':
 else:
     CONFIG_DIR = Path.home() / ".config" / "aitranscribe"
 
-CONFIG_FILE = CONFIG_DIR / "aitranscribe.conf"
+CONFIG_FILE = CONFIG_DIR / "config.toml"
+LEGACY_CONFIG_FILE = CONFIG_DIR / "aitranscribe.conf"
 PROMPTS_FILE = CONFIG_DIR / "prompts.sqlite"
 PROMPTS_CONFIG = CONFIG_DIR / "prompts.toml"
 
 def _create_default_config() -> None:
-    CONFIG_DIR.mkdir(parents=True, exist_ok=True)
-    with open(CONFIG_FILE, "w") as f:
-        f.write('# Speech-to-Text Configuration\n')
-        f.write('GROQ_API_KEY="your_groq_api_key_here"\n')
-        f.write('GROQ_STT_MODEL="whisper-large-v3-turbo"\n')
-        f.write('\n# LLM Post-Processing Configuration\n')
-        f.write('LLM_PROVIDER="openrouter"\n')
-        f.write('\n# OpenRouter (default provider)\n')
-        f.write('OPENROUTER_API_KEY="your_openrouter_api_key_here"\n')
-        f.write('OPENROUTER_LLM_MODEL="anthropic/claude-3-haiku"\n')
-        f.write('\n# Cohere (alternative provider)\n')
-        f.write('# COHERE_API_KEY="your_cohere_api_key_here"\n')
-        f.write('# COHERE_LLM_MODEL="command-r"\n')
-        f.write('\n# z.ai (alternative provider)\n')
-        f.write('# ZAI_API_KEY="your_zai_api_key_here"\n')
-        f.write('# ZAI_LLM_MODEL="glm-5"\n')
-        f.write('\n# Google (alternative provider)\n')
-        f.write('# GOOGLE_API_KEY="your_google_api_key_here"\n')
-        f.write('# GOOGLE_LLM_MODEL="gemini-2.0-flash"\n')
-        f.write('\n# Cortecs (alternative provider)\n')
-        f.write('# CORTECS_API_KEY="your_cortecs_api_key_here"\n')
-        f.write('# CORTECS_LLM_MODEL="qwen3.8-flash-next"\n')
-        f.write('\n# TUI Defaults\n')
-        f.write('PRE_PROCESS_MODE="english"\n')
-        f.write('LAST_FILE_PATH=""\n')
-        f.write('VERBOSE_ERRORS="false"\n')
-        f.write('OUTPUT_WIDTH="80"\n')
-        # Single quotes to avoid dotenv escape handling of \a, \b, \f, \n, etc.
-        f.write(f"\nPROMPTS_FILE='{PROMPTS_FILE}'\n")
+    config.create_default(CONFIG_FILE, prompts_file=PROMPTS_FILE)
     console.print(f"Created configuration at {CONFIG_FILE}")
     console.print("Please edit this file to add your API keys before running the tool.")
 
-_MIGRATION_BLOCKS: list[tuple[str, str]] = [
-    ("GROQ_API_KEY", '\n# Added during migration\nGROQ_API_KEY="your_groq_api_key_here"\nGROQ_STT_MODEL="whisper-large-v3-turbo"\n'),
-    ("LLM_PROVIDER", '\n# Added during multi-provider migration\nLLM_PROVIDER="openrouter"\n'),
-    ("COHERE_API_KEY", '\n# Cohere (alternative provider)\n# COHERE_API_KEY="your_cohere_api_key_here"\n# COHERE_LLM_MODEL="command-r"\n'),
-    ("ZAI_API_KEY", '\n# z.ai (alternative provider)\n# ZAI_API_KEY="your_zai_api_key_here"\n# ZAI_LLM_MODEL="glm-5"\n'),
-    ("GOOGLE_API_KEY", '\n# Google (alternative provider)\n# GOOGLE_API_KEY="your_google_api_key_here"\n# GOOGLE_LLM_MODEL="gemini-2.0-flash"\n'),
-    ("CORTECS_API_KEY", '\n# Cortecs (alternative provider)\n# CORTECS_API_KEY="your_cortecs_api_key_here"\n# CORTECS_LLM_MODEL="qwen3.8-flash-next"\n'),
-    ("PRE_PROCESS_MODE", '\n# TUI Defaults\nPRE_PROCESS_MODE="english"\n'),
-    ("LAST_FILE_PATH", 'LAST_FILE_PATH=""\n'),
-    ("VERBOSE_ERRORS", 'VERBOSE_ERRORS="false"\n'),
-    ("OUTPUT_WIDTH", '\n# Output line wrapping: 0 (off), 80, or 120\nOUTPUT_WIDTH="80"\n'),
-]
-
 def _migrate_config() -> None:
-    # dotenv_values ignores comments, so a commented-out `# GROQ_API_KEY=...`
-    # line no longer counts as present (old substring check did).
-    existing_keys = {key for key, value in dotenv_values(CONFIG_FILE).items() if value is not None}
-    additions = "".join(block for key, block in _MIGRATION_BLOCKS if key not in existing_keys)
-    if not additions:
+    """Convert a legacy aitranscribe.conf once; never append to it again."""
+    summary = config.migrate_if_needed(LEGACY_CONFIG_FILE, CONFIG_FILE)
+    if not summary:
         return
-    with open(CONFIG_FILE, "a") as f:
-        f.write(additions)
+    console.print(
+        f"Migrated {summary['backup'].name} → {CONFIG_FILE.name} "
+        f"(stt: {summary['stt_provider']}, llm: {summary['llm_provider']})."
+    )
+    console.print(f"Legacy file kept as {summary['backup']}")
 
 # Populated by init_app(); import must stay side-effect-free.
 _initialized = False
-GROQ_API_KEY: str | None = None
-GROQ_STT_MODEL: str | None = None
-LLM_PROVIDER: str = "openrouter"
+CONFIG: config.AppConfig | None = None
+STT_ENDPOINT: config.Endpoint | None = None
+LLM_ENDPOINT: config.Endpoint | None = None
+STT_PROVIDER: str = ""
+LLM_PROVIDER: str = ""
+STT_MODEL: str = ""
+LLM_MODEL: str = ""
 
 # ------------------------------------------------------------------#
 # Prompt Templates
@@ -372,13 +299,6 @@ def build_translate_messages(text: str, target_language: str) -> list[dict]:
     ]
 
 
-def _env_flag(name: str, default: bool) -> bool:
-    value = os.getenv(name)
-    if value is None:
-        return default
-    return value.strip().lower() in {"1", "true", "yes", "on"}
-
-
 def _normalize_pre_process_mode(value: str | None) -> str:
     normalized = (value or "english").strip().lower()
     return normalized if normalized in _PRE_PROCESS_MODES else "english"
@@ -400,21 +320,15 @@ DEFAULT_VERBOSE_ERRORS: bool = False
 DEFAULT_OUTPUT_WIDTH: int = 80
 OUTPUT_WIDTH: int = DEFAULT_OUTPUT_WIDTH
 
-def _get_llm_client() -> OpenAI | None:
-    if LLM_PROVIDER not in LLM_PROVIDERS:
-        console.print(f"Warning: Unknown LLM_PROVIDER '{LLM_PROVIDER}', falling back to 'openrouter'")
-        provider = LLM_PROVIDERS["openrouter"]
-    else:
-        provider = LLM_PROVIDERS[LLM_PROVIDER]
+def _build_client(endpoint: config.Endpoint | None) -> OpenAI | None:
+    """OpenAI client for one endpoint, using only that endpoint's own key.
 
-    api_key = os.getenv(provider["env_key"])
-    if not api_key or api_key == f"your_{LLM_PROVIDER}_api_key_here":
+    STT and LLM never share credentials: a whisper key must not reach the LLM
+    provider and an LLM key must not reach the STT server.
+    """
+    if endpoint is None or not endpoint.has_key:
         return None
-
-    return OpenAI(
-        base_url=provider["base_url"],
-        api_key=api_key,
-    )
+    return OpenAI(base_url=endpoint.base_url, api_key=endpoint.api_key)
 
 _MSYS2_UCRT64_BIN = r"C:\msys64\ucrt64\bin"
 
@@ -487,67 +401,117 @@ def _write_wav(filename: str, data: "np.ndarray", samplerate: int) -> None:
         f.writeframes(arr.tobytes())
 
 
-def _get_llm_model() -> str:
-    if LLM_PROVIDER not in LLM_PROVIDERS:
-        provider = LLM_PROVIDERS["openrouter"]
-    else:
-        provider = LLM_PROVIDERS[LLM_PROVIDER]
-    return os.getenv(provider["env_model"], provider["default_model"])
+def _load_app_config() -> config.AppConfig:
+    """Load config.toml (creating or migrating it first when needed)."""
+    if not CONFIG_FILE.exists():
+        if LEGACY_CONFIG_FILE.exists():
+            _migrate_config()
+        else:
+            _create_default_config()
+    return config.load(CONFIG_FILE)
 
 
-def persist_config_value(key: str, value: str, *, config_file: Path = CONFIG_FILE) -> None:
-    config_file.parent.mkdir(parents=True, exist_ok=True)
-    set_key(str(config_file), key, value, quote_mode="auto")
-    os.environ[key] = value
+def _apply_app_config(app_config: config.AppConfig) -> None:
+    """Derive all runtime globals from a loaded AppConfig."""
+    global CONFIG, STT_ENDPOINT, LLM_ENDPOINT, PROMPTS_FILE
+    global STT_PROVIDER, LLM_PROVIDER, STT_MODEL, LLM_MODEL
+    global DEFAULT_PRE_PROCESS_MODE, DEFAULT_VERBOSE_ERRORS, OUTPUT_WIDTH
+    global stt_client, llm_client
+
+    CONFIG = app_config
+    STT_ENDPOINT = app_config.stt.active()
+    LLM_ENDPOINT = app_config.llm.active()
+    STT_PROVIDER = STT_ENDPOINT.name
+    LLM_PROVIDER = LLM_ENDPOINT.name
+    STT_MODEL = STT_ENDPOINT.model
+    LLM_MODEL = LLM_ENDPOINT.model
+
+    ui = app_config.ui
+    if app_config.prompts_file:
+        PROMPTS_FILE = Path(app_config.prompts_file)
+    DEFAULT_PRE_PROCESS_MODE = _normalize_pre_process_mode(ui.get("pre_process_mode"))
+    DEFAULT_VERBOSE_ERRORS = bool(ui.get("verbose_errors", False))
+    OUTPUT_WIDTH = _normalize_output_width(ui.get("output_width", DEFAULT_OUTPUT_WIDTH))
+
+    stt_client = _build_client(STT_ENDPOINT)
+    llm_client = _build_client(LLM_ENDPOINT)
+
+
+def _persist_ui(field_name: str, value: Any) -> None:
+    config.set_value(CONFIG_FILE, "ui", field_name, value=value)
+    if CONFIG is not None:
+        CONFIG.ui[field_name] = value
+
+
+def _persist_profile_value(scope: str, field_name: str, value: str) -> None:
+    """Write a field into the active profile table (never a scope-level override)."""
+    endpoint = config.load(CONFIG_FILE).scope(scope).active()
+    config.set_value(CONFIG_FILE, scope, "providers", endpoint.name, field_name, value=value)
+    _apply_app_config(config.load(CONFIG_FILE))
+
+
+def _persist_provider(scope: str, name: str) -> None:
+    config.set_value(CONFIG_FILE, scope, "provider", value=name)
+    _apply_app_config(config.load(CONFIG_FILE))
 
 
 def persist_tui_setting(setting_name: str, value: Any) -> None:
     global OUTPUT_WIDTH
     if setting_name == "pre_process_mode":
-        persist_config_value("PRE_PROCESS_MODE", _normalize_pre_process_mode(str(value)))
+        _persist_ui("pre_process_mode", _normalize_pre_process_mode(str(value)))
         return
     if setting_name == "file_path":
-        persist_config_value("LAST_FILE_PATH", str(value).strip())
+        _persist_ui("last_file_path", str(value).strip())
         return
     if setting_name == "verbose":
-        persist_config_value("VERBOSE_ERRORS", "true" if bool(value) else "false")
+        _persist_ui("verbose_errors", bool(value))
         return
     if setting_name == "output_width":
         OUTPUT_WIDTH = _normalize_output_width(value)
-        persist_config_value("OUTPUT_WIDTH", str(OUTPUT_WIDTH))
+        _persist_ui("output_width", OUTPUT_WIDTH)
         return
     if setting_name == "stt_model":
-        persist_config_value("GROQ_STT_MODEL", str(value).strip() or GROQ_STT_MODEL)
+        _persist_profile_value(config.STT, "model", str(value).strip() or STT_MODEL)
         return
     if setting_name == "llm_model":
-        provider = LLM_PROVIDERS.get(LLM_PROVIDER, LLM_PROVIDERS["openrouter"])
-        persist_config_value(provider["env_model"], str(value).strip() or provider["default_model"])
+        _persist_profile_value(config.LLM, "model", str(value).strip() or LLM_MODEL)
+        return
+    if setting_name == "stt_provider":
+        _persist_provider(config.STT, str(value).strip())
+        return
+    if setting_name == "llm_provider":
+        _persist_provider(config.LLM, str(value).strip())
 
 
 def get_tui_settings() -> dict[str, Any]:
-    config = dotenv_values(CONFIG_FILE)
-    provider = LLM_PROVIDERS.get(LLM_PROVIDER, LLM_PROVIDERS["openrouter"])
+    app_config = config.load(CONFIG_FILE)
+    ui = app_config.ui
+    stt_endpoint = app_config.stt.active()
+    llm_endpoint = app_config.llm.active()
     return {
-        "pre_process_mode": _normalize_pre_process_mode(config.get("PRE_PROCESS_MODE") or DEFAULT_PRE_PROCESS_MODE),
+        "pre_process_mode": _normalize_pre_process_mode(ui.get("pre_process_mode")),
         # Recording mode always starts as microphone; the TUI source selection is session-only.
         "input_source": "microphone",
-        "file_path": str(config.get("LAST_FILE_PATH") or "").strip(),
-        "stt_model": (config.get("GROQ_STT_MODEL") or GROQ_STT_MODEL or "whisper-large-v3-turbo").strip(),
-        "llm_model": (config.get(provider["env_model"]) or LLM_MODEL or provider["default_model"]).strip(),
-        "verbose": str(config.get("VERBOSE_ERRORS", str(DEFAULT_VERBOSE_ERRORS))).strip().lower() in {"1", "true", "yes", "on"},
-        "output_width": _normalize_output_width(config.get("OUTPUT_WIDTH", DEFAULT_OUTPUT_WIDTH)),
+        "file_path": str(ui.get("last_file_path") or "").strip(),
+        "stt_provider": stt_endpoint.name,
+        "llm_provider": llm_endpoint.name,
+        "stt_providers": {name: app_config.stt.profiles[name].model for name in app_config.stt.names()},
+        "llm_providers": {name: app_config.llm.profiles[name].model for name in app_config.llm.names()},
+        "stt_model": stt_endpoint.model,
+        "llm_model": llm_endpoint.model,
+        "verbose": bool(ui.get("verbose_errors", DEFAULT_VERBOSE_ERRORS)),
+        "output_width": _normalize_output_width(ui.get("output_width", DEFAULT_OUTPUT_WIDTH)),
     }
 
 stt_client: OpenAI | None = None
 llm_client: OpenAI | None = None
-LLM_MODEL: str | None = None
 
 # Option Factory Functions
 def post_process_option():
     return typer.Option(False, "--post-process", "-p", help="Refine text: correct grammar, remove fillers, and structure clearly")
 
 def stt_model_option():
-    return typer.Option(None, help="Groq STT model to use")
+    return typer.Option(None, help="STT model override for this run (default: model of the active STT profile)")
 
 def llm_model_option():
     return typer.Option(None, "--llm-model", "-m", help="LLM model to use for post-processing")
@@ -622,12 +586,25 @@ def validate_api_keys(post_process: str | None) -> None:
         raise typer.Exit(code=1)
 
 def stt_missing_message() -> str:
-    return f"GROQ_API_KEY is not set or invalid in {CONFIG_FILE}."
+    if STT_ENDPOINT is None:
+        return f"No STT profile configured in {CONFIG_FILE}."
+    if not STT_ENDPOINT.has_key:
+        return (
+            f"STT profile '{STT_ENDPOINT.name}' has no API key. Set api_key or "
+            f"api_key_env in [{config.STT}.providers.{STT_ENDPOINT.name}] of {CONFIG_FILE}."
+        )
+    return f"STT profile '{STT_ENDPOINT.name}' is not usable."
 
 
 def llm_missing_message() -> str:
-    provider_key = LLM_PROVIDERS.get(LLM_PROVIDER, LLM_PROVIDERS["openrouter"])["env_key"]
-    return f"{provider_key} is not set but needed for post-processing. Set LLM_PROVIDER and the corresponding API key in {CONFIG_FILE}."
+    if LLM_ENDPOINT is None:
+        return f"No LLM profile configured in {CONFIG_FILE}."
+    if not LLM_ENDPOINT.has_key:
+        return (
+            f"LLM profile '{LLM_ENDPOINT.name}' has no API key. Set api_key or "
+            f"api_key_env in [{config.LLM}.providers.{LLM_ENDPOINT.name}] of {CONFIG_FILE}."
+        )
+    return f"LLM profile '{LLM_ENDPOINT.name}' is not usable."
 
 
 def require_stt_client() -> OpenAI:
@@ -931,44 +908,30 @@ prompt_manager: PromptManager | None = None
 
 def init_app() -> None:
     """Run all setup that used to happen at import time. Idempotent."""
-    global _initialized, PROMPTS_FILE, GROQ_API_KEY, GROQ_STT_MODEL, LLM_PROVIDER
-    global PROMPTS, stt_client, llm_client, LLM_MODEL, prompt_manager
-    global DEFAULT_PRE_PROCESS_MODE, DEFAULT_VERBOSE_ERRORS, OUTPUT_WIDTH
+    global _initialized, PROMPTS, prompt_manager
     if _initialized:
         return
 
-    if not CONFIG_FILE.exists():
-        _create_default_config()
-    else:
-        _migrate_config()
-
-    load_dotenv(dotenv_path=CONFIG_FILE)
-
-    PROMPTS_FILE = Path(os.getenv("PROMPTS_FILE", str(PROMPTS_FILE)))
-    GROQ_API_KEY = os.getenv("GROQ_API_KEY")
-    GROQ_STT_MODEL = os.getenv("GROQ_STT_MODEL", "whisper-large-v3-turbo")
-    LLM_PROVIDER = os.getenv("LLM_PROVIDER", "openrouter").lower()
-
-    DEFAULT_PRE_PROCESS_MODE = _normalize_pre_process_mode(os.getenv("PRE_PROCESS_MODE", "english"))
-    DEFAULT_VERBOSE_ERRORS = _env_flag("VERBOSE_ERRORS", False)
-    OUTPUT_WIDTH = _normalize_output_width(os.getenv("OUTPUT_WIDTH", DEFAULT_OUTPUT_WIDTH))
-
+    _apply_app_config(_load_app_config())
     PROMPTS = _load_prompts()
-
-    stt_client = (
-        OpenAI(
-            base_url="https://api.groq.com/openai/v1",
-            api_key=GROQ_API_KEY,
-        )
-        if GROQ_API_KEY and GROQ_API_KEY != "your_groq_api_key_here"
-        else None
-    )
-
-    llm_client = _get_llm_client()
-    LLM_MODEL = _get_llm_model()
-
     prompt_manager = PromptManager(PROMPTS_FILE)
     _initialized = True
+
+
+def _chunk_with_active_profile(audio_file: str) -> list[str]:
+    """Chunk with the active STT profile's ceilings (never a global constant).
+
+    The ceilings belong to the endpoint: Groq mangles text beyond ~122 s, a
+    self-hosted Whisper only has to stay under the proxy timeout.
+    """
+    endpoint = STT_ENDPOINT
+    if endpoint is None:
+        return chunk_audio(audio_file)
+    return chunk_audio(
+        audio_file,
+        max_size_mb=endpoint.max_upload_mb,
+        max_duration_s=endpoint.max_upload_s,
+    )
 
 
 def run_transcription_pipeline(
@@ -999,7 +962,7 @@ def run_transcription_pipeline(
 
     feedback("transcribe", "active")
     if do_chunk:
-        chunks = chunk_audio(audio_file)
+        chunks = _chunk_with_active_profile(audio_file)
     else:
         chunks = [audio_file]
 
@@ -1070,7 +1033,7 @@ def process_recorded_audio_for_tui(
 
         final_text, transcript = run_transcription_pipeline(
             final_mp3_file,
-            stt_model=str(settings.get("stt_model", GROQ_STT_MODEL)),
+            stt_model=str(settings.get("stt_model", STT_MODEL)),
             llm_model=str(settings.get("llm_model", LLM_MODEL)),
             needs_llm=needs_llm,
             target_language=target_language,
@@ -1156,7 +1119,7 @@ def process_file_for_tui(
 
     final_text, raw_text = run_transcription_pipeline(
         file_for_processing,
-        stt_model=str(settings.get("stt_model", GROQ_STT_MODEL)),
+        stt_model=str(settings.get("stt_model", STT_MODEL)),
         llm_model=str(settings.get("llm_model", LLM_MODEL)),
         needs_llm=needs_llm,
         target_language=target_language,
@@ -1246,7 +1209,7 @@ def launch_tui(width_override: int | None = None) -> None:
         prompt_manager=prompt_manager,
         process_audio=process_recorded_audio_for_tui,
         process_file=process_file_for_tui,
-        stt_provider_name="Groq",
+        stt_provider_name=STT_PROVIDER,
         llm_provider_name=LLM_PROVIDER,
         default_stt_model=settings["stt_model"],
         default_llm_model=settings["llm_model"],
@@ -1275,6 +1238,150 @@ app = typer.Typer(
     no_args_is_help=False,
 )
 
+config_app = typer.Typer(
+    help="Inspect, validate and maintain config.toml.",
+    no_args_is_help=True,
+    add_completion=False,
+    rich_markup_mode=None,
+)
+app.add_typer(config_app, name="config")
+
+
+def _print_endpoint(endpoint: config.Endpoint, *, reveal: bool) -> None:
+    console.print(f"  [{endpoint.scope}] {endpoint.name}" + (f" — {endpoint.description}" if endpoint.description else ""), markup=False)
+    console.print(f"    base_url       {endpoint.base_url}", markup=False)
+    console.print(f"    model          {endpoint.model}", markup=False)
+    if endpoint.has_key:
+        shown = endpoint.api_key if reveal else config.mask_key(endpoint.api_key)
+        sources = ", ".join(endpoint.key_sources)
+        console.print(f"    api_key        {shown}  ({sources})", markup=False)
+    else:
+        console.print("    api_key        <missing>", markup=False)
+    if endpoint.scope == config.STT:
+        console.print(f"    chunk limits   {endpoint.max_upload_s} s / {endpoint.max_upload_mb} MB", markup=False)
+
+
+def _print_config(app_config: config.AppConfig, *, reveal: bool) -> None:
+    console.print(f"Configuration: {app_config.path}  (schema {app_config.version})", markup=False)
+    console.print("")
+    for scope in (app_config.stt, app_config.llm):
+        _print_endpoint(scope.active(), reveal=reveal)
+        inactive = [name for name in scope.names() if name != scope.provider]
+        if inactive:
+            console.print(f"    other profiles {', '.join(inactive)}", markup=False)
+        console.print("")
+    ui = app_config.ui
+    console.print(f"  [ui] mode={ui.get('pre_process_mode', DEFAULT_PRE_PROCESS_MODE)} "
+                  f"width={ui.get('output_width', DEFAULT_OUTPUT_WIDTH)} "
+                  f"verbose={bool(ui.get('verbose_errors', False))}", markup=False)
+    if app_config.prompts_file:
+        console.print(f"  [paths] prompts_file={app_config.prompts_file}", markup=False)
+
+
+def _probe_endpoint(endpoint: config.Endpoint) -> tuple[bool, str]:
+    if not endpoint.has_key:
+        return False, "no API key configured"
+    try:
+        client = OpenAI(base_url=endpoint.base_url, api_key=endpoint.api_key, timeout=15.0, max_retries=0)
+        models = client.models.list()
+        ids = [getattr(item, "id", "") for item in getattr(models, "data", [])]
+        if ids and endpoint.model not in ids:
+            return True, f"reachable; model '{endpoint.model}' not in advertised list ({', '.join(ids[:4])}…)"
+        return True, "reachable"
+    except Exception as exc:  # noqa: BLE001 - any failure is a failed probe
+        return False, f"{type(exc).__name__}: {exc}"
+
+
+@config_app.command("path")
+def config_path_command() -> None:
+    """Print the configuration file location."""
+    console.print(str(CONFIG_FILE))
+    if LEGACY_CONFIG_FILE.exists():
+        console.print(f"Legacy file still present: {LEGACY_CONFIG_FILE}")
+
+
+@config_app.command("show")
+def config_show_command(
+    reveal: bool = typer.Option(False, "--reveal", help="Show full API keys instead of masking them"),
+) -> None:
+    """Show the effective configuration (active profiles, limits, key sources)."""
+    try:
+        _print_config(config.load(CONFIG_FILE), reveal=reveal)
+    except config.ConfigError as exc:
+        console.print(f"Error: {exc}")
+        raise typer.Exit(code=1)
+
+
+@config_app.command("check")
+def config_check_command(
+    probe: bool = typer.Option(False, "--probe", help="Send GET /v1/models to each active profile"),
+) -> None:
+    """Validate the configuration and optionally probe each active endpoint."""
+    try:
+        app_config = config.load(CONFIG_FILE)
+    except config.ConfigError as exc:
+        console.print(f"Error: {exc}")
+        raise typer.Exit(code=1)
+
+    failures = 0
+    for scope in (app_config.stt, app_config.llm):
+        endpoint = scope.active()
+        problems: list[str] = []
+        if not endpoint.base_url:
+            problems.append("base_url missing")
+        if not endpoint.has_key:
+            problems.append(f"no API key in [{scope.name}.providers.{endpoint.name}]")
+        if problems:
+            failures += 1
+            console.print(f"✗ [{scope.name}] {endpoint.name}: {'; '.join(problems)}", markup=False)
+            continue
+        detail = f"{endpoint.base_url}  ({endpoint.model})"
+        if probe:
+            ok, message = _probe_endpoint(endpoint)
+            if not ok:
+                failures += 1
+                console.print(f"✗ [{scope.name}] {endpoint.name}: {detail} — {message}", markup=False)
+                continue
+            detail = f"{detail} — {message}"
+        console.print(f"✓ [{scope.name}] {endpoint.name}: {detail}", markup=False)
+
+    if failures:
+        raise typer.Exit(code=1)
+
+
+@config_app.command("edit")
+def config_edit_command() -> None:
+    """Open config.toml in $EDITOR and validate the result."""
+    editor = os.getenv("EDITOR") or os.getenv("VISUAL") or "vi"
+    try:
+        subprocess.run([editor, str(CONFIG_FILE)], check=False)
+    except FileNotFoundError:
+        console.print(f"Error: editor '{editor}' not found. Edit {CONFIG_FILE} manually.")
+        raise typer.Exit(code=1)
+    try:
+        config.load(CONFIG_FILE)
+    except config.ConfigError as exc:
+        console.print(f"Error: {exc}")
+        raise typer.Exit(code=1)
+    console.print(f"{CONFIG_FILE} is valid.")
+
+
+@config_app.command("migrate")
+def config_migrate_command() -> None:
+    """Convert a legacy aitranscribe.conf into config.toml (idempotent)."""
+    if CONFIG_FILE.exists():
+        console.print(f"{CONFIG_FILE} already exists; nothing to migrate.")
+        raise typer.Exit(code=0)
+    summary = config.migrate_dotenv(LEGACY_CONFIG_FILE, CONFIG_FILE)
+    if summary is None:
+        console.print(f"No legacy {LEGACY_CONFIG_FILE.name} found; nothing to migrate.")
+        raise typer.Exit(code=0)
+    console.print(f"Migrated {summary['legacy_keys']} legacy values → {CONFIG_FILE}")
+    console.print(f"  stt profiles: {', '.join(summary['stt_profiles'])} (active: {summary['stt_provider']})")
+    console.print(f"  llm profiles: {', '.join(summary['llm_profiles'])} (active: {summary['llm_provider']})")
+    console.print(f"  legacy file kept as {summary['backup']}")
+
+
 @app.callback(invoke_without_command=True)
 def main(
     ctx: typer.Context,
@@ -1302,7 +1409,15 @@ def main(
     if ctx.resilient_parsing:
         return
 
-    init_app()
+    # `aitranscribe config …` must work even when the config itself is broken.
+    if ctx.invoked_subcommand is not None:
+        return
+
+    try:
+        init_app()
+    except config.ConfigError as exc:
+        console.print(f"Error: {exc}")
+        raise typer.Exit(code=1)
 
     if width is not None:
         if width not in _ALLOWED_OUTPUT_WIDTHS:
@@ -1312,7 +1427,7 @@ def main(
         OUTPUT_WIDTH = width
 
     if stt_model is None:
-        stt_model = GROQ_STT_MODEL
+        stt_model = STT_MODEL
     if llm_model is None:
         llm_model = LLM_MODEL
 
@@ -1327,7 +1442,7 @@ def main(
             english,
             post_process,
             verbose,
-            stt_model != GROQ_STT_MODEL,
+            stt_model != STT_MODEL,
             llm_model != LLM_MODEL,
         ]
     )
@@ -1381,7 +1496,7 @@ def transcribe_file(file_path: str, stt_model: str, llm_model: str, post_process
     validate_api_keys("post_process" if needs_llm else None)
 
     console.print(f"Preparing to transcribe file: {file_path}")
-    console.print(f"STT Provider: Groq")
+    console.print(f"STT Provider: {STT_PROVIDER}")
     console.print(f"STT Model: {stt_model}")
     if needs_llm:
         console.print(f"LLM Provider: {LLM_PROVIDER}")
@@ -1669,7 +1784,7 @@ def record_from_microphone(stt_model: str, llm_model: str, post_process: bool, v
     validate_api_keys("post_process" if needs_llm else None)
 
     console.print("Toggle Recording")
-    console.print(f"STT Provider: Groq")
+    console.print(f"STT Provider: {STT_PROVIDER}")
     console.print(f"STT Model: {stt_model}")
     if needs_llm:
         console.print(f"LLM Provider: {LLM_PROVIDER}")
