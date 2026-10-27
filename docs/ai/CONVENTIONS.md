@@ -16,6 +16,7 @@ Follow these without question. Do not deviate unless explicitly told.
 - `main.py` import must stay side-effect-free. All setup (config create/migrate, `load_dotenv`, env constants, `PROMPTS`, OpenAI clients, `prompt_manager`) lives in the idempotent `init_app()`; `main()` calls it before any logic. Never add new module-level side effects.
 - CLI option defaults that depend on initialized state (e.g. `stt_model`, `llm_model`) must default to `None` and be resolved inside `main()` after `init_app()`, because typer evaluates signature defaults at import time.
 - Tests that call `init_app()` directly must restore all init-populated globals (see `_INIT_GLOBALS` in `tests/test_cli.py`) so later tests see consistent module state.
+- `tests/conftest.py` runs the whole suite against a temporary config directory. A test that reloads `main` must not assume the module path constants survive — the autouse `_reassert_config_isolation` fixture restores them between tests.
 
 ## API Patterns
 - Never use `assert` for runtime validation in production code (`python -O` strips asserts and missing-API-key errors lose all context). Use `require_stt_client()` / `require_llm_client()` from `main.py` instead of touching the module-level `stt_client` / `llm_client` singletons directly; they raise `RuntimeError` with user-facing messages shared with `validate_api_keys()`.
@@ -23,7 +24,7 @@ Follow these without question. Do not deviate unless explicitly told.
 - `PromptManager` returns data (lists, bools, strings) and never prints; CLI rendering lives in `main.py` helpers (`print_stored_prompts`, `remove_prompt_by_index`).
 - For TUI-triggered transcription work, send progress through the four high-level feedback IDs `compress`, `transcribe`, `post_process`, and `summary`, and use a separate transcript callback to surface raw STT text before post-processing finishes.
 - `process_with_llm(client, messages, llm_model)` accepts pre-built `messages: list[dict]` and does not construct prompts internally. Use `build_post_process_messages`, `build_summary_messages`, or `build_translate_messages` to assemble messages before calling it.
-- The translation sub-template (`{{translate}}` in the post_process user template) is resolved before injection — when no translation is requested, the placeholder is replaced with an empty string, keeping exactly 2 messages to the LLM.
+- The translation clause travels in the **system** prompt (`{{target_language_clause}}`, filled from `[post_process.translate].prompt`), not in the user template. `build_post_process_messages()` substitutes only `{{text}}` in the user template; never reintroduce a `{{translate}}` placeholder there.
 
 ## Database
 - Keep prompt summaries nullable in SQLite and migrate older `prompts` tables in place by adding `summary` instead of rebuilding the whole database when only that column is missing.
@@ -73,6 +74,8 @@ Follow these without question. Do not deviate unless explicitly told.
 
 ## Testing
 - Cover TUI integration points from the CLI layer with focused unit tests instead of trying to run an interactive terminal session in `pytest`.
+- **Tests never touch `~/.config/aitranscribe`.** `tests/conftest.py` owns the isolation of `main.CONFIG_DIR` and its derived paths; a test that needs a different config file patches `main.CONFIG_FILE`/`main.PROMPTS_CONFIG` with `monkeypatch` inside `tmp_path`.
+- Structural changes to `prompts.toml` (new tables) must be seeded by `_seed_missing_prompt_keys()`; value-only default changes must extend the `_LEGACY_*` upgrade path. Both paths need a test in `tests/test_cli.py` (`test_load_prompts_*`).
 - Add focused unit tests for clipboard fallback helpers and TUI state-selection behavior instead of trying to verify them through live terminal automation.
 - `core.py` tests live in `tests/test_core.py` (all core functions in one file); mock `core.subprocess.run` or `core._ffmpeg` and use pytest `tmp_path` for real files — never mock `os.path` for `chunk_audio` discovery logic.
 - When a tested function closes a file handle before you can assert on it (e.g. `transcribe_audio`), capture content via a `side_effect` function instead of asserting on the call-args file object later.

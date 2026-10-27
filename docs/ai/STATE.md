@@ -1,47 +1,42 @@
 # Project State
 
-2026-10-27: Configuration is TOML now (`config.toml`, schema version 2) with
-independent per-scope provider profiles. Issue #86 shipped and closed, 254
-tests pass, live setup verified: STT on a self-hosted Whisper endpoint, LLM
-post-processing on Groq.
+2026-10-27: Configuration is TOML (`config.toml`, schema version 2) with
+independent per-scope provider profiles (#86). Prompt migration and test
+isolation were repaired the same day; **257 tests pass** against a temporary
+config directory, and the owner's live setup was re-synced from think.
 
 ## Current Focus
 
-The dotenv config (`aitranscribe.conf`) was replaced because it could no longer
-be edited: `_migrate_config()` re-appended blocks on every start (commented keys
-are invisible to `dotenv_values`) — the owner's file held **118 duplicated
-Cohere blocks in 511 lines** — and it could not express "STT self-hosted, LLM
-cloud" at all (hardcoded Groq STT base URL, one shared `GROQ_API_KEY`).
+`prompts.toml` is now self-healing and the suite is config-isolated.
 
-- `config.py` (new): schema v2, `load()`, key resolution (`api_key`/
-  `api_key_env`, string or array, env first), validation with profile lists in
-  error messages, `set_value()` (tomlkit, comment-preserving), renderer,
-  `create_default()`, one-shot dotenv migration with `.bak-<timestamp>`.
-- `main.py`: globals are derived from the loaded config (`CONFIG`,
-  `STT_ENDPOINT`, `LLM_ENDPOINT`, `STT_PROVIDER/LLM_PROVIDER`,
-  `STT_MODEL/LLM_MODEL`); `_build_client()` keeps credentials inside their
-  scope; `_chunk_with_active_profile()` passes the profile's ceilings to
-  `chunk_audio`; new `aitranscribe config show|check [--probe]|edit|migrate|path`.
-- `tui.py`: STT/LLM `Select`s in the Configuration panel, model follows the
-  provider, provider switches persist `[<scope>].provider` only.
-- `config.example.toml` replaces `config.example`; README documents the schema,
-  the built-in provider defaults and the config commands.
-- Owner's live `~/.config/aitranscribe/config.toml` migrated automatically on
-  first start and then switched to `[stt].provider = "selfhosted-1"`
-  (`https://whisper.kik.spengergasse.at/v1`, `large-v3`, 900 s/100 MB) with
-  `[llm].provider = "groq"` (`openai/gpt-oss-120b`) unchanged.
+- `main._seed_missing_prompt_keys()` (new): fills keys that a `prompts.toml`
+  lacks entirely from `_DEFAULT_PROMPTS_TOML`, writes with tomlkit
+  (comment-preserving), and `_load_prompts()` re-reads the file. Fixes the
+  pre-#73 case with no `[post_process.system]` table, which used to die in
+  `_validate_prompts()` with `SystemExit(1)`.
+- `_upgrade_legacy_prompt_defaults()` is unchanged and still owns *value*
+  upgrades; the two paths are complementary.
+- `tests/conftest.py` (new): repoints `main.CONFIG_DIR`, `CONFIG_FILE`,
+  `LEGACY_CONFIG_FILE`, `PROMPTS_FILE`, `PROMPTS_CONFIG` at a `mkdtemp()`
+  directory at import time and again in the autouse
+  `_reassert_config_isolation` fixture (needed because
+  `test_import_does_not_initialize_state` reloads `main`).
+- `CONVENTIONS.md` corrected: `{{translate}}` is no longer a user-template
+  placeholder — the translation clause lives in the system prompt.
 
 ## Verification
 
-- `PYNPUT_BACKEND=dummy ./venv/bin/pytest -q`: **254 passed**
-  (21 new in `tests/test_config.py`; CLI/TUI integration for key isolation,
-  provider switch, comment-preserving writes, `config show|check|migrate`).
-- `aitranscribe config check --probe`: both active profiles reachable
-  (selfhosted-1 → gregor via `whisper.kik.spengergasse.at`, groq → LLM).
-- Live pipeline run: raw STT from gregor with umlauts intact, then Groq
-  post-processing — both return the expected text.
-- Headless TUI smoke (`run_test()`): provider selects show `selfhosted-1` and
-  `groq`, model input prefilled `large-v3`.
+- `./venv/bin/pytest -q`: **257 passed** (was 134 passed / 120 errors before
+  the isolation fix; +3 new tests: `test_load_prompts_seeds_missing_system_table`,
+  `test_seeding_missing_prompt_keys_preserves_customizations`,
+  `test_conftest_isolates_the_suite_from_the_real_user_config`).
+- Real-config safety checked by md5: a full suite run leaves
+  `~/.config/aitranscribe/prompts.toml` byte-identical.
+- End-to-end replay of the failure: a pre-#73 file (no `[post_process.system]`,
+  custom user template) now loads, gets the table seeded, and keeps its
+  customization verbatim.
+- `./venv/bin/python main.py --list` runs against the live config.
+- Venv: Python 3.14.4, `tomlkit` 0.15.2 installed, `pydub` gone.
 
 ## Blockers
 
@@ -49,8 +44,8 @@ cloud" at all (hardcoded Groq STT base URL, one shared `GROQ_API_KEY`).
 
 ## Next Session Suggestion
 
-- `docs/ai/DECISIONS.md` is 249 lines (guide: 200) — split by topic next time
-  it is touched (e.g. `DECISIONS-config.md`, `DECISIONS-audio.md`).
+- `docs/ai/DECISIONS.md` is ~260 lines (guide: 200) — split by topic next touch
+  (`DECISIONS-config.md`, `DECISIONS-audio.md`, `DECISIONS-prompts.md`).
 - `~/.config/aitranscribe/.aitranscribe.conf.swp` is a leftover vim swap file
   from the old dotenv config; harmless, safe to delete.
 - `python-dotenv` is only used by the migration now; drop it in the release

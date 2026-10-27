@@ -1,23 +1,22 @@
 # Handoff
 
-## 2026-10-27 session: TOML config schema v2, provider profiles (#86)
-- Shipped: `config.toml` (schema `version = 2`) replaces `aitranscribe.conf`.
-  Scope tables hold the selector only; `[<scope>.providers.<name>]` carries
-  `base_url`, `api_key`/`api_key_env` (string or array), `model`, and its own
-  `max_upload_s`/`max_upload_mb`.
-- New `config.py` (load/validate/key-resolution/render/write/migrate),
-  `config.example.toml`, `tests/test_config.py`.
-- New CLI: `aitranscribe config show|check [--probe]|edit|migrate|path`.
-- TUI: STT/LLM provider selectors; the model input follows the selected
-  profile and is not persisted as a model edit.
-- Owner's live config is migrated and switched to
-  `[stt].provider = "selfhosted-1"` (Whisper `large-v3` on gregor via
-  `https://whisper.kik.spengergasse.at/v1`, 900 s / 100 MB) with
-  `[llm].provider = "groq"` (`openai/gpt-oss-120b`). Legacy dotenv file kept as
-  `~/.config/aitranscribe/aitranscribe.conf.bak-20261027-071647`.
-- Verified: 254 tests pass; `config check --probe` green for both scopes;
-  live run transcribes through gregor and post-processes through Groq.
-- No pending implementation tasks for #86.
+## 2026-10-27 session: prompt self-healing + test isolation (follow-up to #86)
+- Shipped `main._seed_missing_prompt_keys()`: a `prompts.toml` that lacks a
+  required table (e.g. `[post_process.system]`, added in #73) is repaired in
+  place from `_DEFAULT_PROMPTS_TOML` with tomlkit and re-read by
+  `_load_prompts()`. Existing keys — including customizations — are never
+  touched. `_upgrade_legacy_prompt_defaults()` keeps owning value upgrades.
+- Shipped `tests/conftest.py`: the whole suite runs against a `mkdtemp()`
+  config dir, so the developer's `~/.config/aitranscribe` is never read or
+  written. Autouse fixture re-asserts the paths after any `importlib.reload`.
+- Three new tests in `tests/test_cli.py` (seeding, customization preservation,
+  isolation invariant). Full suite: 257 passed.
+- Owner's live `prompts.toml` on elite was replaced with think's copy
+  (md5 `75a7bbac280c3873471575381e98ca81`, default content; the previous
+  customized file is at `prompts.toml.bak-2026-10-27`). It carried a
+  `{{translate}}` placeholder that `build_post_process_messages()` no longer
+  substitutes.
+- No pending implementation tasks.
 
 ## Notes for the next agent
 - Never add a scope-level override (e.g. `[stt].model`): one value, one place —
@@ -26,9 +25,11 @@
   text, otherwise Rich eats the brackets.
 - `main.get_tui_settings()` reloads from `CONFIG_FILE`; tests only need to
   patch `main.CONFIG_FILE`, not the `CONFIG` global.
+- Tests must go through `tests/conftest.py`'s isolated paths; do not "fix"
+  `CONFIG_DIR` by adding a production env override without a decision entry.
 - `python-dotenv` is migration-only now (one release of grace, then remove).
-- `docs/ai/DECISIONS.md` (249 lines) should be split by topic next touch.
+- `docs/ai/DECISIONS.md` (~260 lines) should be split by topic next touch.
 - Host has no `Xvfb`/`xvfb-run`; headless pytest works with
-  `PYNPUT_BACKEND=dummy`.
+  `PYNPUT_BACKEND=dummy` (not needed here — the suite ran without it).
 
 Last cleared: 2026-10-27.
