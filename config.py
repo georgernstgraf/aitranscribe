@@ -63,6 +63,20 @@ DEFAULT_LLM_PROVIDER = "openrouter"
 DEFAULT_MAX_UPLOAD_S = 120
 DEFAULT_MAX_UPLOAD_MB = 25
 
+# Live fragmentation (see CONTEXT.md): the fragment upload format is an
+# endpoint property — the profile owns what its service accepts. `none` writes
+# 16-bit PCM WAV and skips ffmpeg entirely (lowest latency); `ogg` is Opus
+# 24 kbps, `mp3` is 32 kbps (both via ffmpeg).
+UPLOAD_FORMATS = ("none", "ogg", "mp3")
+DEFAULT_UPLOAD_FORMAT = "none"
+
+# Fragmenttakt (cut interval) and Suchfenster (search window) in seconds. The
+# search window must be fully recorded before a cut is decided and is searched
+# in full; the cut interval is the time that must elapse before cutting.
+DEFAULT_CUT_INTERVAL_S = 45.0
+DEFAULT_SEARCH_WINDOW_S = 5.0
+MIN_SEARCH_WINDOW_S = 0.5
+
 # Built-in defaults so a known provider id works without a base_url line.
 # A profile may override every field. Unknown ids must supply base_url/model.
 PROVIDER_DEFAULTS: dict[str, dict[str, Any]] = {
@@ -124,6 +138,7 @@ class Endpoint:
     key_sources: tuple[str, ...] = ()
     max_upload_s: int = DEFAULT_MAX_UPLOAD_S
     max_upload_mb: int = DEFAULT_MAX_UPLOAD_MB
+    upload_format: str = DEFAULT_UPLOAD_FORMAT
     description: str = ""
 
     @property
@@ -163,12 +178,21 @@ class Scope:
 
 
 @dataclass(frozen=True)
+class RecordingSettings:
+    """Live fragmentation timings (CONTEXT.md: Fragmenttakt, Suchfenster)."""
+
+    cut_interval_s: float = DEFAULT_CUT_INTERVAL_S
+    search_window_s: float = DEFAULT_SEARCH_WINDOW_S
+
+
+@dataclass(frozen=True)
 class AppConfig:
     path: Path
     stt: Scope
     llm: Scope
     ui: dict[str, Any] = field(default_factory=dict)
     paths: dict[str, Any] = field(default_factory=dict)
+    recording: RecordingSettings = field(default_factory=RecordingSettings)
     version: int = SCHEMA_VERSION
 
     def scope(self, name: str) -> Scope:
@@ -216,6 +240,7 @@ def load(path: Path, *, environ: dict[str, str] | None = None) -> AppConfig:
         llm=_load_scope(LLM, raw, env),
         ui=dict(raw.get("ui") or {}),
         paths=dict(raw.get("paths") or {}),
+        recording=_load_recording(raw),
     )
 
 
@@ -283,8 +308,63 @@ def _load_endpoint(
             table.get("max_upload_mb"), int(defaults.get("max_upload_mb", DEFAULT_MAX_UPLOAD_MB)),
             f"[{scope}.providers.{name}].max_upload_mb",
         ),
+        upload_format=_upload_format(
+            table.get("upload_format"),
+            f"[{scope}.providers.{name}].upload_format",
+        ),
         description=str(table.get("description") or "").strip(),
     )
+
+
+def _upload_format(value: Any, label: str) -> str:
+    """Validate the fragment upload format; the endpoint owns it."""
+    if value is None:
+        return DEFAULT_UPLOAD_FORMAT
+    fmt = str(value).strip().lower()
+    if fmt not in UPLOAD_FORMATS:
+        raise ConfigError(
+            f"{label} must be one of {', '.join(UPLOAD_FORMATS)} (got {value!r})."
+        )
+    return fmt
+
+
+def _load_recording(raw: dict[str, Any]) -> RecordingSettings:
+    """Parse [recording]: Fragmenttakt and Suchfenster (seconds)."""
+    section = raw.get("recording") or {}
+    if not isinstance(section, dict):
+        raise ConfigError("[recording] must be a table.")
+    cut_interval = _positive_float(
+        section.get("cut_interval_seconds"),
+        DEFAULT_CUT_INTERVAL_S,
+        "[recording].cut_interval_seconds",
+    )
+    search_window = _positive_float(
+        section.get("search_window_seconds"),
+        DEFAULT_SEARCH_WINDOW_S,
+        "[recording].search_window_seconds",
+    )
+    if search_window < MIN_SEARCH_WINDOW_S:
+        raise ConfigError(
+            f"[recording].search_window_seconds must be at least {MIN_SEARCH_WINDOW_S} s."
+        )
+    if search_window > cut_interval:
+        raise ConfigError(
+            "[recording].search_window_seconds must not exceed "
+            "[recording].cut_interval_seconds."
+        )
+    return RecordingSettings(cut_interval_s=cut_interval, search_window_s=search_window)
+
+
+def _positive_float(value: Any, default: float, label: str) -> float:
+    if value is None:
+        return default
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ConfigError(f"{label} must be a number.") from exc
+    if parsed <= 0:
+        raise ConfigError(f"{label} must be greater than 0.")
+    return parsed
 
 
 def _positive_int(value: Any, default: int, label: str) -> int:
@@ -393,6 +473,8 @@ def _toml_value(value: Any) -> str:
         return "true" if value else "false"
     if isinstance(value, int):
         return str(value)
+    if isinstance(value, float):
+        return repr(value)
     if isinstance(value, (list, tuple)):
         return "[" + ", ".join(_toml_value(item) for item in value) + "]"
     return json.dumps(str(value), ensure_ascii=False)
@@ -410,6 +492,7 @@ _SELFHOSTED_EXAMPLE = """\
 # model         = "large-v3"
 # max_upload_s  = 900
 # max_upload_mb = 100
+# upload_format = "none"   # none (WAV, no encoding) | ogg (Opus 24k) | mp3 (32k)
 """
 
 
@@ -418,7 +501,7 @@ def _render_profiles(scope: str, profiles: dict[str, dict[str, Any]]) -> list[st
     for name, table in profiles.items():
         lines.append(f"[{scope}.providers.{_toml_key(name)}]")
         ordered = ("description", "base_url", "api_key", "api_key_env", "model",
-                   "max_upload_s", "max_upload_mb")
+                   "max_upload_s", "max_upload_mb", "upload_format")
         for field_name in ordered:
             if field_name in table and table[field_name] not in (None, ""):
                 lines.append(f"{field_name} = {_toml_value(table[field_name])}")
@@ -434,6 +517,7 @@ def render_document(
     llm_profiles: dict[str, dict[str, Any]],
     ui: dict[str, Any],
     paths: dict[str, Any],
+    recording: dict[str, Any] | None = None,
     note: list[str] | None = None,
 ) -> str:
     """Render a fully commented config document (default file and migration)."""
@@ -466,6 +550,23 @@ def render_document(
         f"provider = {_toml_value(llm_provider)}",
         "",
         *_render_profiles(LLM, llm_profiles),
+        "# ── Recording: live fragmentation ───────────────────────────────",
+        "# Fragmenttakt: time that must elapse before a cut may be placed.",
+        "# Suchfenster: forward span that must be fully recorded and is searched",
+        "# in full for the quietest cut point.",
+        "[recording]",
+    ])
+    recording_values = recording or {}
+    lines.append(
+        "cut_interval_seconds = "
+        f"{_toml_value(recording_values.get('cut_interval_seconds', DEFAULT_CUT_INTERVAL_S))}"
+    )
+    lines.append(
+        "search_window_seconds = "
+        f"{_toml_value(recording_values.get('search_window_seconds', DEFAULT_SEARCH_WINDOW_S))}"
+    )
+    lines.extend([
+        "",
         "# ── UI / runtime ────────────────────────────────────────────────",
         "[ui]",
     ])

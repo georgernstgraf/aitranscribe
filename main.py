@@ -7,6 +7,8 @@ import subprocess
 import textwrap
 import tomllib
 import copy
+import queue
+import threading
 import tomlkit
 import typer
 import numpy as np
@@ -20,10 +22,24 @@ from rich.progress import Progress, TextColumn
 from openai import OpenAI
 from pynput import keyboard
 import config
-from core import MAX_AUDIO_SIZE_MB, chunk_audio, transcribe_audio, process_with_llm, compress_audio
+import stt_log
+from fragmenter import FragmentPreparer
+from core import (
+    MAX_AUDIO_SIZE_MB,
+    chunk_audio,
+    encode_fragment,
+    transcribe_audio,
+    process_with_llm,
+    compress_audio,
+    write_wav,
+)
 
 console = Console(highlight=False, color_system=None)
 state = {"verbose": False}
+
+# Live capture is 16 kHz mono 16-bit: Whisper's native rate, so neither the
+# fragmenter nor the service has to resample.
+RECORDING_SAMPLE_RATE = 16000
 
 if os.name == 'nt':
     appdata = os.getenv('APPDATA')
@@ -38,6 +54,8 @@ CONFIG_FILE = CONFIG_DIR / "config.toml"
 LEGACY_CONFIG_FILE = CONFIG_DIR / "aitranscribe.conf"
 PROMPTS_FILE = CONFIG_DIR / "prompts.sqlite"
 PROMPTS_CONFIG = CONFIG_DIR / "prompts.toml"
+# Per-fragment STT log (JSONL). Repointed by tests/conftest.py.
+STT_LOG_FILE = stt_log.default_log_path()
 
 def _create_default_config() -> None:
     config.create_default(CONFIG_FILE, prompts_file=PROMPTS_FILE)
@@ -426,19 +444,7 @@ def _resolve_capture_device() -> int | None:
 
 def _write_wav(filename: str, data: "np.ndarray", samplerate: int) -> None:
     """Write a NumPy array as a 16-bit PCM WAV file using stdlib."""
-    import wave
-
-    arr = np.asarray(data)
-    if arr.dtype.kind == "f":
-        arr = (arr * 32767).astype(np.int16)
-    elif arr.dtype != np.int16:
-        arr = arr.astype(np.int16)
-    nchannels = 1 if arr.ndim == 1 else arr.shape[1]
-    with wave.open(filename, "w") as f:
-        f.setnchannels(nchannels)
-        f.setsampwidth(2)
-        f.setframerate(samplerate)
-        f.writeframes(arr.tobytes())
+    write_wav(filename, data, samplerate)
 
 
 def _load_app_config() -> config.AppConfig:
@@ -974,6 +980,223 @@ def _chunk_with_active_profile(audio_file: str) -> list[str]:
     )
 
 
+class LiveTranscriptionSession:
+    """Fragments the live microphone stream and transcribes fragments serially.
+
+    The fragmenter runs in its own thread and commits a fragment as soon as its
+    full search window has arrived; every commit is encoded in the configured
+    upload format and queued. One transcriber thread drains the queue in commit
+    order — parallel uploads are pointless (#82: gregor serialises on the GPU,
+    Groq runs ~200x realtime) and the order is the transcript order.
+
+    At the stop tap only the tail fragment is left, so stop->raw shrinks from
+    "encode + analyse + upload the whole take" to "upload one fragment".
+    """
+
+    def __init__(
+        self,
+        *,
+        settings: dict[str, Any],
+        on_partial_text: Callable[[str], None] | None = None,
+        log_path: str | Path | None = None,
+    ) -> None:
+        self.settings = settings
+        self.on_partial_text = on_partial_text
+        self.stt_model = str(settings.get("stt_model") or STT_MODEL)
+        endpoint = STT_ENDPOINT
+        self.endpoint_url = endpoint.base_url if endpoint is not None else ""
+        self.upload_format = endpoint.upload_format if endpoint is not None else "none"
+        recording = CONFIG.recording if CONFIG is not None else config.RecordingSettings()
+
+        self._work_dir = tempfile.mkdtemp(prefix="aitranscribe-live-")
+        self._archive_path = os.path.join(self._work_dir, "archive.pcm")
+        self._archive = open(self._archive_path, "wb")
+        self._queue: queue.Queue = queue.Queue()
+        self._texts: dict[int, str] = {}
+        self._lock = threading.Lock()
+        self._thread: threading.Thread | None = None
+        self._error: BaseException | None = None
+        self._errors = 0
+        self._fragments = 0
+        self._audio_ms = 0
+        self._request_bytes = 0
+        self._request_ms = 0
+        self.detected_language: str | None = None
+        self._log = stt_log.SttRequestLog(log_path or STT_LOG_FILE)
+        self._started_at = time.monotonic()
+        self._finished = False
+
+        self.fragmenter = FragmentPreparer(
+            sample_rate=RECORDING_SAMPLE_RATE,
+            cut_interval_s=recording.cut_interval_s,
+            search_window_s=recording.search_window_s,
+            on_fragment=self._on_fragment,
+        )
+
+    # -- lifecycle ---------------------------------------------------------
+    def start(self) -> None:
+        self._started_at = time.monotonic()
+        self._thread = threading.Thread(
+            target=self._transcribe_loop, name="aitranscribe-live-stt", daemon=True
+        )
+        self._thread.start()
+        self.fragmenter.start()
+
+    def add_audio(self, pcm: np.ndarray) -> None:
+        """Capture sink: called from the audio callback thread."""
+        self.fragmenter.append(pcm)
+
+    def finish(self) -> str:
+        """Stop capture, commit the tail, drain the queue, log the summary."""
+        stop_at = time.monotonic()
+        fragmenter_error: BaseException | None = None
+        try:
+            self.fragmenter.stop()
+            self.fragmenter.prepare_tail_sync()
+        except BaseException as exc:  # noqa: BLE001 - re-raised below
+            fragmenter_error = exc
+        finally:
+            self._queue.put(None)
+            if self._thread is not None:
+                self._thread.join()
+                self._thread = None
+            self._close_archive()
+        raw_text = self._joined()
+        stop_to_raw_ms = int((time.monotonic() - stop_at) * 1000)
+        self._log.summary(
+            fragments=self._fragments,
+            audio_ms=self._audio_ms,
+            request_bytes=self._request_bytes,
+            request_ms=self._request_ms,
+            errors=self._errors,
+            recording_ms=int((stop_at - self._started_at) * 1000),
+            stop_to_raw_ms=stop_to_raw_ms,
+        )
+        self._finished = True
+        if fragmenter_error is not None:
+            raise fragmenter_error
+        if self._error is not None and not raw_text:
+            raise self._error
+        return raw_text
+
+    def abort(self) -> None:
+        """Tear the session down without transcribing (cancelled, no audio)."""
+        try:
+            self.fragmenter.stop()
+        except Exception:
+            pass
+        self._queue.put(None)
+        if self._thread is not None:
+            self._thread.join(timeout=2)
+            self._thread = None
+        self._close_archive()
+        self.cleanup()
+
+    def cleanup(self) -> None:
+        shutil.rmtree(self._work_dir, ignore_errors=True)
+
+    # -- fragment -> upload ------------------------------------------------
+    def _on_fragment(self, fragment) -> None:
+        """Called from the fragmenter thread for every committed fragment."""
+        self._archive.write(fragment.pcm.tobytes())
+        self._fragments += 1
+        self._audio_ms += fragment.duration_ms
+        path = encode_fragment(
+            fragment.pcm,
+            fragment.sample_rate,
+            os.path.join(self._work_dir, f"frag_{fragment.index:06d}.wav"),
+            self.upload_format,
+        )
+        self._queue.put((fragment, path))
+
+    def _transcribe_loop(self) -> None:
+        while True:
+            item = self._queue.get()
+            try:
+                if item is None:
+                    return
+                fragment, path = item
+                self._transcribe_fragment(fragment, path)
+            finally:
+                self._queue.task_done()
+
+    def _transcribe_fragment(self, fragment, path: str) -> None:
+        request_bytes = stt_log.estimate_request_bytes(path, self.stt_model)
+        started = time.perf_counter()
+        try:
+            text, language = transcribe_audio(require_stt_client(), path, self.stt_model)
+        except Exception as exc:
+            self._errors += 1
+            if self._error is None:
+                self._error = exc
+            self._log.error(
+                fragment_index=fragment.index,
+                endpoint_url=self.endpoint_url,
+                model=self.stt_model,
+                error_type=type(exc).__name__,
+                status_code=getattr(exc, "status_code", None),
+                message=str(exc),
+            )
+            return
+        finally:
+            if os.path.exists(path):
+                os.remove(path)
+
+        duration_ms = int((time.perf_counter() - started) * 1000)
+        self._request_bytes += request_bytes
+        self._request_ms += duration_ms
+        self._log.request(
+            fragment_index=fragment.index,
+            endpoint_url=self.endpoint_url,
+            model=self.stt_model,
+            audio_duration_ms=fragment.duration_ms,
+            upload_format=self.upload_format,
+            request_bytes=request_bytes,
+            duration_ms=duration_ms,
+            silence_aligned=fragment.silence_aligned,
+            quality=fragment.quality,
+        )
+        with self._lock:
+            self._texts[fragment.index] = text
+            if self.detected_language is None and language:
+                self.detected_language = language
+            joined = self._joined_locked()
+        if self.on_partial_text is not None:
+            self.on_partial_text(joined)
+
+    def _joined_locked(self) -> str:
+        return " ".join(
+            text for _index, text in sorted(self._texts.items()) if text
+        ).strip()
+
+    def _joined(self) -> str:
+        with self._lock:
+            return self._joined_locked()
+
+    # -- archive -----------------------------------------------------------
+    def _close_archive(self) -> None:
+        if not self._archive.closed:
+            self._archive.close()
+
+    def write_archive_mp3(self, target_path: str) -> str | None:
+        """Encode the full recording to the persisted MP3 archive.
+
+        Runs after the raw transcript was delivered, so the encode is off the
+        latency path. Returns None when no audio was captured.
+        """
+        if not os.path.exists(self._archive_path) or os.path.getsize(self._archive_path) == 0:
+            return None
+        pcm = np.fromfile(self._archive_path, dtype=np.int16)
+        wav_path = str(Path(target_path).with_suffix(".wav"))
+        write_wav(wav_path, pcm, RECORDING_SAMPLE_RATE)
+        try:
+            compress_audio(wav_path, output_path=target_path)
+        finally:
+            if os.path.exists(wav_path):
+                os.remove(wav_path)
+        return target_path
+
+
 def run_transcription_pipeline(
     audio_file: str,
     *,
@@ -1040,12 +1263,20 @@ def run_transcription_pipeline(
     return final_text, raw_text
 
 
-def process_recorded_audio_for_tui(
-    audio_np: np.ndarray,
+def process_live_recording(
+    session: LiveTranscriptionSession,
     settings: dict[str, Any],
     feedback_callback: Callable[[str, str], None] | None = None,
     transcript_callback: Callable[[str], None] | None = None,
 ) -> dict[str, Any]:
+    """Finish a live recording session: drain, post-process, archive, store.
+
+    The fragments were already transcribed while recording; this only waits
+    for the tail fragment, then runs the optional LLM post-process and encodes
+    the MP3 archive. A fragment error that still left usable text is logged and
+    the partial transcript is delivered; only a completely failed session
+    raises.
+    """
     mode = str(settings.get("pre_process_mode", "english"))
     target_language = get_pre_process_prompt(mode)
     needs_llm = mode != "raw"
@@ -1054,50 +1285,56 @@ def process_recorded_audio_for_tui(
     if verbose:
         state["verbose"] = True
 
-    validate_api_keys("post_process" if needs_llm else None)
-
-    raw_wav_file, final_mp3_file = get_recording_file_paths(".mp3")
-    samplerate = 44100
-    _write_wav(raw_wav_file, audio_np, samplerate)
-
     def update_feedback(step_id: str, status: str) -> None:
         if feedback_callback:
             feedback_callback(step_id, status)
 
     try:
-        update_feedback("compress", "active")
-        compress_audio(raw_wav_file, output_path=final_mp3_file)
-        update_feedback("compress", "done")
-        if os.path.exists(raw_wav_file):
-            os.remove(raw_wav_file)
+        validate_api_keys("post_process" if needs_llm else None)
+    except Exception:
+        session.abort()
+        raise
 
-        final_text, transcript = run_transcription_pipeline(
-            final_mp3_file,
-            stt_model=str(settings.get("stt_model", STT_MODEL)),
-            llm_model=str(settings.get("llm_model", LLM_MODEL)),
-            needs_llm=needs_llm,
-            target_language=target_language,
-            do_chunk=True,
-            on_transcript=transcript_callback,
-            on_feedback=update_feedback,
+    update_feedback("transcribe", "active")
+    try:
+        raw_text = session.finish()
+    except Exception:
+        session.cleanup()
+        raise
+    update_feedback("transcribe", "done")
+    if transcript_callback:
+        transcript_callback(raw_text)
+
+    final_text = raw_text
+    if needs_llm:
+        update_feedback("post_process", "active")
+        messages = build_post_process_messages(
+            raw_text, target_language, source_language=session.detected_language
         )
+        final_text = process_with_llm(
+            require_llm_client(), messages, str(settings.get("llm_model", LLM_MODEL))
+        )
+        update_feedback("post_process", "done")
+    else:
+        update_feedback("post_process", "skipped")
 
-        append_mode = bool(settings.get("append_mode", False))
-        if append_mode:
-            prompt_id = None
-        else:
-            prompt_id = prompt_manager.add_prompt(final_text, final_mp3_file)
+    _, final_mp3_file = get_recording_file_paths(".mp3")
+    session.write_archive_mp3(final_mp3_file)
+    session.cleanup()
 
-        display_text = wrap_text(final_text, settings.get("output_width", OUTPUT_WIDTH))
-        return {
-            "text": display_text,
-            "raw_text": transcript,
-            "file_path": final_mp3_file,
-            "prompt_id": str(prompt_id) if prompt_id is not None else "",
-        }
-    finally:
-        if os.path.exists(raw_wav_file):
-            os.remove(raw_wav_file)
+    append_mode = bool(settings.get("append_mode", False))
+    if append_mode:
+        prompt_id = None
+    else:
+        prompt_id = prompt_manager.add_prompt(final_text, final_mp3_file)
+
+    display_text = wrap_text(final_text, settings.get("output_width", OUTPUT_WIDTH))
+    return {
+        "text": display_text,
+        "raw_text": raw_text,
+        "file_path": final_mp3_file,
+        "prompt_id": str(prompt_id) if prompt_id is not None else "",
+    }
 
 
 def normalize_file_path(file_path: str) -> str:
@@ -1247,8 +1484,9 @@ def launch_tui(width_override: int | None = None) -> None:
         settings["output_width"] = width_override
     app = AitranscribeTUI(
         prompt_manager=prompt_manager,
-        process_audio=process_recorded_audio_for_tui,
+        process_audio=process_live_recording,
         process_file=process_file_for_tui,
+        live_session_factory=LiveTranscriptionSession,
         stt_provider_name=STT_PROVIDER,
         llm_provider_name=LLM_PROVIDER,
         default_stt_model=settings["stt_model"],
@@ -1674,14 +1912,17 @@ def _record_until_toggle(
     listener: keyboard.Listener | None,
     fd: int | None,
     old_settings: Any,
-    audio_data: list[Any],
+    sink: Callable[[np.ndarray], None] | None,
+    counter: dict[str, int],
     samplerate: int,
     channels: int,
 ) -> None:
-    """Record into audio_data until SPACE toggles stop or ESC cancels. Returns on cancel."""
+    """Record into `sink` until SPACE toggles stop or ESC cancels. Returns on cancel."""
     def callback(indata, frames, cb_time, status):
         if recording_state["is_recording"]:
-            audio_data.append(indata.copy())
+            counter["frames"] += len(indata)
+            if sink is not None:
+                sink(indata.copy())
 
     try:
         # Hide cursor during recording
@@ -1755,13 +1996,15 @@ def _record_until_toggle(
 
 
 def _capture_microphone_recording(
-    verbose: bool, samplerate: int = 44100, channels: int = 1
-) -> np.ndarray | None:
-    """Run toggle-mode microphone capture.
+    verbose: bool,
+    samplerate: int = RECORDING_SAMPLE_RATE,
+    channels: int = 1,
+    sink: Callable[[np.ndarray], None] | None = None,
+) -> bool:
+    """Run toggle-mode microphone capture into `sink`.
 
-    Returns the recorded audio as a numpy array, or None if the user
-    cancelled or no audio was captured. Raises typer.Exit(1) when no
-    keyboard input mechanism is available.
+    Returns True when audio was captured, False when the user cancelled or no
+    frames arrived. Raises typer.Exit(1) when no keyboard input is available.
     """
     console.print("Press SPACE to start recording. Press SPACE again to stop. Press ESC to cancel.")
 
@@ -1781,28 +2024,23 @@ def _capture_microphone_recording(
             console.print(f"Error: Could not set up keyboard input.")
             raise typer.Exit(code=1)
 
-    audio_data: list[Any] = []
-    _record_until_toggle(recording_state, listener, fd, old_settings, audio_data, samplerate, channels)
+    counter = {"frames": 0}
+    _record_until_toggle(
+        recording_state, listener, fd, old_settings, sink, counter, samplerate, channels
+    )
 
     if recording_state["cancelled"]:
-        return None
+        return False
 
-    if not audio_data:
+    if counter["frames"] == 0:
         console.print("No audio recorded. Exiting.")
-        return None
+        return False
 
-    return np.concatenate(audio_data, axis=0)
-
-
-def _persist_recording(raw_wav_file: str, final_mp3_file: str) -> None:
-    """Compress the recorded WAV to MP3 and clean up the raw WAV."""
-    compress_audio(raw_wav_file, output_path=final_mp3_file)
-    if os.path.exists(raw_wav_file):
-        os.remove(raw_wav_file)
+    return True
 
 
-def _report_recording_result(final_text: str, transcript: str, needs_llm: bool, mp3_file: str) -> None:
-    """Print transcription results and store the final text in the prompt queue."""
+def _report_recording_result(final_text: str, transcript: str, needs_llm: bool) -> None:
+    """Print transcription results (the prompt entry is added by the session)."""
     console.print("\nTranscription Complete:")
     console.print(wrap_text(transcript))
 
@@ -1810,15 +2048,12 @@ def _report_recording_result(final_text: str, transcript: str, needs_llm: bool, 
         console.print("\nLLM Result:")
         console.print(wrap_text(final_text))
 
-    prompt_manager.add_prompt(final_text, mp3_file)
-
 
 def record_from_microphone(stt_model: str, llm_model: str, post_process: bool, verbose: bool, english: bool):
-    """Record audio from microphone in toggle mode and transcribe it using Groq."""
+    """Record audio from microphone in toggle mode and transcribe it live."""
     if verbose:
         state["verbose"] = True
 
-    target_language = "English" if english else None
     needs_llm = english or post_process
 
     validate_api_keys("post_process" if needs_llm else None)
@@ -1830,13 +2065,25 @@ def record_from_microphone(stt_model: str, llm_model: str, post_process: bool, v
         console.print(f"LLM Provider: {LLM_PROVIDER}")
         console.print(f"LLM Model: {llm_model}")
 
-    audio_np = _capture_microphone_recording(verbose)
-    if audio_np is None:
+    settings = {
+        "pre_process_mode": "english" if english else ("cleanup" if post_process else "raw"),
+        "stt_model": stt_model,
+        "llm_model": llm_model,
+        "verbose": verbose,
+        "output_width": OUTPUT_WIDTH,
+        "append_mode": False,
+    }
+    session = LiveTranscriptionSession(settings=settings)
+    session.start()
+
+    try:
+        captured = _capture_microphone_recording(verbose, sink=session.add_audio)
+    except BaseException:
+        session.abort()
+        raise
+    if not captured:
+        session.abort()
         return
-
-    raw_wav_file, final_mp3_file = get_recording_file_paths(".mp3")
-
-    _write_wav(raw_wav_file, audio_np, 44100)
 
     try:
         with Progress(
@@ -1844,35 +2091,29 @@ def record_from_microphone(stt_model: str, llm_model: str, post_process: bool, v
             transient=True,
             console=console
         ) as progress:
-            # First, compress WAV to MP3 to save bandwidth and potentially tokens
-            progress.add_task(description="Compressing audio...", total=None)
-            _persist_recording(raw_wav_file, final_mp3_file)
+            task_id = progress.add_task(description="Transcribing remaining audio...", total=None)
 
-            console.print(f"Audio saved to {final_mp3_file}")
+            def on_feedback(step_id: str, status: str) -> None:
+                if status != "active":
+                    return
+                if step_id == "post_process":
+                    progress.update(task_id, description="Processing with LLM...")
 
-            final_text, transcript = run_transcription_pipeline(
-                final_mp3_file,
-                stt_model=stt_model,
-                llm_model=llm_model,
-                needs_llm=needs_llm,
-                target_language=target_language,
-                do_chunk=True,
-                on_progress=lambda message: progress.update(progress.task_ids[0], description=message),
+            result = process_live_recording(
+                session, settings, feedback_callback=on_feedback
             )
 
-        _report_recording_result(final_text, transcript, needs_llm, final_mp3_file)
+        _report_recording_result(
+            result["text"], result["raw_text"], needs_llm
+        )
 
     except Exception as e:
         console.print(f"An error occurred: {str(e)}")
         if state["verbose"]:
             console.print_exception()
-        # Keep the file on disk if there is an error
-        console.print(f"Retaining recorded file for debugging: {final_mp3_file}")
-    else:
-        # We now keep the final mp3 file on disk for reuse, as requested
-        # We only clean up the raw uncompressed wav file
-        if os.path.exists(raw_wav_file):
-            os.remove(raw_wav_file)
+        archive = getattr(session, "_archive_path", "")
+        if archive and os.path.exists(archive):
+            console.print(f"Retaining recorded audio for debugging: {archive}")
 
 def main_cli():
     app()

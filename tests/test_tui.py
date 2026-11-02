@@ -186,7 +186,7 @@ def test_is_pane_focus_mode_with_history_list_focus():
         assert app.is_command_mode() is False
 
 
-def test_feedback_steps_include_compress_stage_first():
+def test_feedback_steps_start_with_transcription():
     app = AitranscribeTUI(
         prompt_manager=Mock(),
         process_audio=Mock(),
@@ -199,16 +199,15 @@ def test_feedback_steps_include_compress_stage_first():
     )
 
     assert app.FEEDBACK_STEPS == [
-        ("compress", "Compressing Message"),
         ("transcribe", "Transcribing Raw Message"),
         ("post_process", "Post-Processing Message"),
         ("summary", "Creating Summary"),
     ]
-    assert app.feedback_state["compress"] == "pending"
+    assert app.feedback_state["transcribe"] == "pending"
 
 
 @pytest.mark.anyio
-async def test_refresh_feedback_renders_compress_stage():
+async def test_refresh_feedback_renders_transcribe_stage():
     prompt_manager = Mock()
     prompt_manager.count_prompts.return_value = 0
     prompt_manager.recent_prompts.return_value = []
@@ -225,10 +224,10 @@ async def test_refresh_feedback_renders_compress_stage():
     )
 
     async with app.run_test():
-        app.update_feedback_state("compress", "done")
+        app.update_feedback_state("transcribe", "done")
         feedback_text = app.query_one("#feedback_panel", Static).render()
 
-    assert "Compressing Message" in str(feedback_text)
+    assert "Transcribing Raw Message" in str(feedback_text)
 
 
 @pytest.mark.anyio
@@ -1320,15 +1319,19 @@ async def test_apply_summary_to_history_ignores_unknown_prompt_id():
 
 def test_recording_controller_pause_discards_frames():
     controller = RecordingController()
+    received: list = []
+    controller.sink = received.append
     controller.is_recording = True
 
     controller.pause()
     controller._callback(np.zeros((10, 1), dtype=np.float32), 10, None, None)
-    assert controller._chunks == []
+    assert received == []
+    assert controller.frames_captured == 0
 
     controller.resume()
     controller._callback(np.ones((10, 1), dtype=np.float32), 10, None, None)
-    assert len(controller._chunks) == 1
+    assert len(received) == 1
+    assert controller.frames_captured == 10
 
 
 def test_toggle_pause_ignored_when_not_recording():
@@ -1590,7 +1593,7 @@ def test_recording_controller_start_opens_the_native_device():
         controller.start()
 
     mock_sd.InputStream.assert_called_once_with(
-        samplerate=44100, channels=1, device=24, callback=controller._callback
+        samplerate=16000, channels=1, device=24, callback=controller._callback
     )
     assert controller.device == 24
     assert controller.device_label() == "Default Source (PulseAudio)"

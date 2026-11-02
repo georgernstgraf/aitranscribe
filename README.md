@@ -162,6 +162,7 @@ api_key       = "…"              # string or array
 model         = "large-v3"
 max_upload_s  = 900              # chunk ceiling; Groq needs <=120 (see below)
 max_upload_mb = 100
+upload_format = "none"           # none (WAV, no encoding) | ogg (Opus 24k) | mp3 (32k)
 
 [stt.providers.groq]
 api_key       = "gsk_…"
@@ -175,6 +176,10 @@ provider = "groq"
 [llm.providers.groq]
 api_key = "gsk_…"
 model   = "openai/gpt-oss-120b"
+
+[recording]
+cut_interval_seconds = 45.0      # Fragmenttakt
+search_window_seconds = 5.0      # Suchfenster
 
 [ui]
 pre_process_mode = "raw"         # raw, cleanup, or english
@@ -200,6 +205,26 @@ Rules:
 - **`max_upload_s` / `max_upload_mb`** are per profile. Groq must stay at ≤120 s
   (its API mangles text beyond ~122 s); self-hosted servers can go much higher
   (only the reverse-proxy timeout limits them).
+- **`upload_format`** is per profile: `none` uploads 16-bit PCM WAV and never
+  runs ffmpeg (lowest latency), `ogg` encodes Opus 24 kbps, `mp3` MP3 32 kbps.
+
+### Live fragmentation
+
+Microphone recordings are cut into fragments **while recording**. Two timings
+control it (glossary in `CONTEXT.md`):
+
+- **Fragmenttakt** (`cut_interval_seconds`): the time that must elapse before a
+  cut may be placed, measured from the previous actual cut.
+- **Suchfenster** (`search_window_seconds`): the forward span that must be fully
+  recorded before a cut is decided, and that is searched in full for the
+  quietest place (adaptive silence metric, 150 ms margin inside the pause).
+
+Each committed fragment is transcribed immediately, serially, so at the stop tap
+only the tail fragment is left — stop→raw is one fragment upload instead of the
+whole take. Every request appends one JSONL line to
+`$XDG_STATE_HOME/aitranscribe/stt_requests.jsonl` (endpoint, model, audio
+duration, upload format, request bytes, request duration), API errors get their
+own lines, and the stop tap writes a summary line.
 
 ### Built-in provider defaults
 

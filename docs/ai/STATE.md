@@ -1,42 +1,47 @@
 # Project State
 
-2026-10-27: Configuration is TOML (`config.toml`, schema version 2) with
-independent per-scope provider profiles (#86). Prompt migration and test
-isolation were repaired the same day; **257 tests pass** against a temporary
-config directory, and the owner's live setup was re-synced from think.
+2026-11-02: Live fragmentation shipped (#88). Microphone recordings are cut
+into fragments **while recording** and each fragment is transcribed as soon as
+it commits; the post-hoc `chunk_audio` path remains only for `--file`.
+**311 tests pass** against a temporary config directory.
 
 ## Current Focus
 
-`prompts.toml` is now self-healing and the suite is config-isolated.
+The port of polished-recognition's fragmentation into `fragmenter.py`:
 
-- `main._seed_missing_prompt_keys()` (new): fills keys that a `prompts.toml`
-  lacks entirely from `_DEFAULT_PROMPTS_TOML`, writes with tomlkit
-  (comment-preserving), and `_load_prompts()` re-reads the file. Fixes the
-  pre-#73 case with no `[post_process.system]` table, which used to die in
-  `_validate_prompts()` with `SystemExit(1)`.
-- `_upgrade_legacy_prompt_defaults()` is unchanged and still owns *value*
-  upgrades; the two paths are complementary.
-- `tests/conftest.py` (new): repoints `main.CONFIG_DIR`, `CONFIG_FILE`,
-  `LEGACY_CONFIG_FILE`, `PROMPTS_FILE`, `PROMPTS_CONFIG` at a `mkdtemp()`
-  directory at import time and again in the autouse
-  `_reassert_config_isolation` fixture (needed because
-  `test_import_does_not_initialize_state` reloads `main`).
-- `CONVENTIONS.md` corrected: `{{translate}}` is no longer a user-template
-  placeholder — the translation clause lives in the system prompt.
+- `fragmenter.py` (new): `evaluate()` (SilenceQuality port: 10 ms frames,
+  80 Hz one-pole high-pass without normalisation, adaptive axis
+  `X = 0.65·mean + 100`, deficit-area Q, centroid cut with a 150 ms margin) and
+  `FragmentPreparer` (spool + worker thread, gapless commits, `prepare_tail_sync`).
+- `main.LiveTranscriptionSession` (new): fragmenter → encode (`upload_format`)
+  → serial transcriber thread → live partial text; `finish()` drains the tail,
+  writes the summary log line and returns the joined raw text.
+- `main.process_live_recording` replaces `process_recorded_audio_for_tui`:
+  validates keys, drains the session, runs the LLM post-process, encodes the
+  MP3 archive (after the raw text), stores the prompt.
+- `stt_log.py` (new): JSONL per request/error plus a stop-tap summary under
+  `$XDG_STATE_HOME/aitranscribe/stt_requests.jsonl`.
+- `config.py`: `[recording]` (`cut_interval_seconds` 45, `search_window_seconds`
+  5) and `upload_format` on the STT profile (`none` | `ogg` | `mp3`, default
+  `none`).
+- `tui.py`: `RecordingController` captures 16 kHz and streams into a sink;
+  `FEEDBACK_STEPS` no longer has the `compress` stage; a `live_session_factory`
+  is injected by `main.launch_tui`.
+- `CONTEXT.md` (new): the canonical glossary (Fragmenttakt, Suchfenster,
+  Fragment, Festschreibung, erzwungener Schnitt, Restfragment, Q).
 
 ## Verification
 
-- `./venv/bin/pytest -q`: **257 passed** (was 134 passed / 120 errors before
-  the isolation fix; +3 new tests: `test_load_prompts_seeds_missing_system_table`,
-  `test_seeding_missing_prompt_keys_preserves_customizations`,
-  `test_conftest_isolates_the_suite_from_the_real_user_config`).
-- Real-config safety checked by md5: a full suite run leaves
-  `~/.config/aitranscribe/prompts.toml` byte-identical.
-- End-to-end replay of the failure: a pre-#73 file (no `[post_process.system]`,
-  custom user template) now loads, gets the table seeded, and keeps its
-  customization verbatim.
-- `./venv/bin/python main.py --list` runs against the live config.
-- Venv: Python 3.14.4, `tomlkit` 0.15.2 installed, `pydub` gone.
+- `./venv/bin/pytest -q`: **311 passed** (was 257).
+- Real end-to-end against the live `selfhosted-1` profile (espeak speech →
+  16 kHz → fragmenter → real STT): 5 fragments, all cuts silence-aligned, the
+  262 ms tail forced; transcript complete; per-fragment STT 0.7–1.4 s.
+- Full `LiveTranscriptionSession` run: 4 fragments, 4 live partial updates,
+  archive MP3 written, log = 4 `stt_request` lines + 1 `stt_summary`
+  (`stop_to_raw_ms` 3089 on a 3.4 s tail).
+- `config check --probe`: both scopes reachable.
+- Live config untouched: `config.load(~/.config/aitranscribe/config.toml)`
+  picks up the new defaults (`upload_format=none`, recording 45/5).
 
 ## Blockers
 
@@ -44,23 +49,14 @@ config directory, and the owner's live setup was re-synced from think.
 
 ## Next Session Suggestion
 
-- `docs/ai/DECISIONS.md` is ~260 lines (guide: 200) — split by topic next touch
+- Real microphone dictation on think/elite: confirm the TUI live partial text
+  and measure stop→raw at the 45/5 defaults (expected: one tail upload).
+- #89 (seam conditioning: pre-roll + prompt carry-over + echo trim) is the
+  planned follow-up; the parent #88 stays open until it closes.
+- `docs/ai/DECISIONS.md` is now well over 200 lines — split by topic next touch
   (`DECISIONS-config.md`, `DECISIONS-audio.md`, `DECISIONS-prompts.md`).
-- elite's live `config.toml` now mirrors think's active scopes: `[stt]
-  selfhosted-1` (gregor `large-v3`, 900 s/100 MB) and `[llm] groq`
-  (`openai/gpt-oss-120b`); both API keys were copied from think. Verified with
-  a real pipeline run (espeak test MP3 → umlauts intact → Groq cleanup).
-- elite's `[llm.providers.openrouter]` keeps a real key but a deprecated model
-  (`anthropic/claude-3-haiku`, 404 since 2026-09-10). Retarget it (e.g.
-  `anthropic/claude-haiku-4.5`) or delete the profile before switching back.
-- A snapshot of the pre-change elite config is at
-  `~/.config/aitranscribe/config.toml.bak-20261027-190245`.
-- `~/.config/aitranscribe/.aitranscribe.conf.swp` is a leftover vim swap file
-  from the old dotenv config; harmless, safe to delete.
-- `python-dotenv` is only used by the migration now; drop it in the release
-  after next (keep `config._legacy_values` until then).
 - Pre-existing watch items: a small-but-long file with failing `ffprobe` is
   returned unsplit by `chunk_audio`; `transcribe_audio` has no retry/backoff
-  for transient 429s.
+  for transient 429s; the live path validates API keys only after recording.
 - Groq support report (mangled `text` >120 s, correct `words[]`) still owed
   upstream.

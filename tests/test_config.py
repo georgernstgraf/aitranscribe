@@ -306,3 +306,78 @@ def test_mask_key_keeps_edges():
 def test_normalize_provider_id_folds_legacy_alias():
     assert config.normalize_provider_id("z.ai") == "zai"
     assert config.normalize_provider_id("  GROQ ") == "groq"
+
+
+# --------------------------------------------------------------------------- #
+# Live fragmentation: upload_format (endpoint) and [recording]
+# --------------------------------------------------------------------------- #
+def test_upload_format_defaults_to_none(tmp_path):
+    cfg = config.load(write(tmp_path / "config.toml", MINIMAL), environ={})
+
+    assert cfg.stt.active().upload_format == "none"
+    assert cfg.llm.active().upload_format == "none"
+
+
+@pytest.mark.parametrize("fmt", ["none", "ogg", "mp3", "OGG"])
+def test_upload_format_accepts_the_three_values(tmp_path, fmt):
+    text = MINIMAL.replace(
+        'model = "large-v3"', f'model = "large-v3"\nupload_format = "{fmt}"'
+    )
+    cfg = config.load(write(tmp_path / "config.toml", text), environ={})
+
+    assert cfg.stt.active().upload_format == fmt.lower()
+
+
+def test_upload_format_rejects_unknown_value(tmp_path):
+    text = MINIMAL.replace(
+        'model = "large-v3"', 'model = "large-v3"\nupload_format = "flac"'
+    )
+    with pytest.raises(config.ConfigError, match="upload_format must be one of"):
+        config.load(write(tmp_path / "config.toml", text), environ={})
+
+
+def test_recording_defaults(tmp_path):
+    cfg = config.load(write(tmp_path / "config.toml", MINIMAL), environ={})
+
+    assert cfg.recording.cut_interval_s == 45.0
+    assert cfg.recording.search_window_s == 5.0
+
+
+def test_recording_reads_both_timings(tmp_path):
+    text = MINIMAL + "\n[recording]\ncut_interval_seconds = 30\nsearch_window_seconds = 2.5\n"
+    cfg = config.load(write(tmp_path / "config.toml", text), environ={})
+
+    assert cfg.recording.cut_interval_s == 30.0
+    assert cfg.recording.search_window_s == 2.5
+
+
+def test_recording_rejects_window_larger_than_interval(tmp_path):
+    text = MINIMAL + "\n[recording]\ncut_interval_seconds = 10\nsearch_window_seconds = 12\n"
+    with pytest.raises(config.ConfigError, match="must not exceed"):
+        config.load(write(tmp_path / "config.toml", text), environ={})
+
+
+def test_recording_rejects_tiny_search_window(tmp_path):
+    text = MINIMAL + "\n[recording]\nsearch_window_seconds = 0.1\n"
+    with pytest.raises(config.ConfigError, match="at least"):
+        config.load(write(tmp_path / "config.toml", text), environ={})
+
+
+def test_recording_rejects_non_positive_values(tmp_path):
+    text = MINIMAL + "\n[recording]\ncut_interval_seconds = 0\n"
+    with pytest.raises(config.ConfigError, match="greater than 0"):
+        config.load(write(tmp_path / "config.toml", text), environ={})
+
+
+def test_create_default_renders_recording_section(tmp_path):
+    path = tmp_path / "config.toml"
+    config.create_default(path, prompts_file=tmp_path / "prompts.sqlite")
+
+    text = path.read_text()
+    assert "[recording]" in text
+    assert "cut_interval_seconds = 45.0" in text
+    assert "search_window_seconds = 5.0" in text
+    assert 'upload_format = "none"' in text  # in the commented self-hosted example
+
+    cfg = config.load(path, environ={})
+    assert cfg.recording.cut_interval_s == 45.0

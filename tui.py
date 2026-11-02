@@ -24,7 +24,7 @@ from textual.widgets.option_list import Option, OptionDoesNotExist
 
 FeedbackCallback = Callable[[str, str], None]
 TranscriptCallback = Callable[[str], None]
-ProcessAudioCallback = Callable[[np.ndarray, dict[str, Any], FeedbackCallback, TranscriptCallback], dict[str, Any]]
+ProcessAudioCallback = Callable[[Any, dict[str, Any], FeedbackCallback, TranscriptCallback], dict[str, Any]]
 ProcessFileCallback = Callable[[str, dict[str, Any], FeedbackCallback, TranscriptCallback], dict[str, Any]]
 GenerateSummaryCallback = Callable[[str, str], str | None]
 TranslateCallback = Callable[[str, str, str], str | None]
@@ -224,12 +224,12 @@ def _close_stream_bounded(stream: Any, timeout: float = STREAM_STOP_TIMEOUT_S) -
 
 @dataclass
 class RecordingController:
-    samplerate: int = 44100
+    samplerate: int = 16000
     channels: int = 1
 
     def __post_init__(self) -> None:
-        self._chunks: list[np.ndarray] = []
         self._stream: sd.InputStream | None = None
+        self.sink: Callable[[np.ndarray], None] | None = None
         self.is_recording = False
         self.paused = False
         self.frames_captured = 0
@@ -240,15 +240,17 @@ class RecordingController:
     def _callback(self, indata: np.ndarray, frames: int, cb_time: Any, status: Any) -> None:
         del frames, cb_time, status
         if self.is_recording and not self.paused:
-            self._chunks.append(indata.copy())
             self.frames_captured += len(indata)
+            if self.sink is not None:
+                self.sink(indata.copy())
 
-    def start(self) -> None:
+    def start(self, sink: Callable[[np.ndarray], None] | None = None) -> None:
+        if sink is not None:
+            self.sink = sink
         sd_module = _get_sd()
         device, label = resolve_input_device(sd_module)
         self.device = device
         self.device_name = label
-        self._chunks = []
         self.frames_captured = 0
         self.last_close_stalled = False
         self.paused = False
@@ -277,20 +279,13 @@ class RecordingController:
         except Exception:
             return "default input"
 
-    def stop(self) -> np.ndarray | None:
+    def stop(self) -> None:
         self.is_recording = False
         self.paused = False
         stream = self._stream
         self._stream = None
         if stream is not None:
             self.last_close_stalled = not _close_stream_bounded(stream)
-
-        if not self._chunks:
-            return None
-
-        audio = np.concatenate(self._chunks, axis=0)
-        self._chunks = []
-        return audio
 
 
 class ErrorDialog(ModalScreen[None]):
@@ -567,7 +562,6 @@ class AitranscribeTUI(App[None]):
     ]
 
     FEEDBACK_STEPS = [
-        ("compress", "Compressing Message"),
         ("transcribe", "Transcribing Raw Message"),
         ("post_process", "Post-Processing Message"),
         ("summary", "Creating Summary"),
@@ -590,6 +584,7 @@ class AitranscribeTUI(App[None]):
         prompt_manager: Any,
         process_audio: ProcessAudioCallback,
         process_file: ProcessFileCallback,
+        live_session_factory: Callable[..., Any] | None = None,
         stt_provider_name: str,
         llm_provider_name: str,
         default_stt_model: str,
@@ -605,6 +600,8 @@ class AitranscribeTUI(App[None]):
         self.prompt_manager = prompt_manager
         self.process_audio = process_audio
         self.process_file = process_file
+        self.live_session_factory = live_session_factory
+        self.live_session: Any = None
         self.persist_setting = persist_setting
         self.generate_summary = generate_summary
         self.backfill_summaries = backfill_summaries
@@ -951,6 +948,9 @@ class AitranscribeTUI(App[None]):
         """Abort an active recording and discard the captured audio."""
         self.cancel_audio_probe()
         self.recorder.stop()
+        if self.live_session is not None:
+            self.live_session.abort()
+            self.live_session = None
         self.is_recording = False
         self.is_paused = False
         self.cancel_append_mode()
@@ -1032,9 +1032,22 @@ class AitranscribeTUI(App[None]):
         self.start_recording()
 
     def start_recording(self) -> None:
+        self.live_session = None
+        sink = None
+        if self.live_session_factory is not None:
+            settings = self.collect_settings()
+            self.live_session = self.live_session_factory(
+                settings=settings,
+                on_partial_text=self._on_live_partial_text,
+            )
+            self.live_session.start()
+            sink = self.live_session.add_audio
         try:
-            self.recorder.start()
+            self.recorder.start(sink=sink)
         except Exception as exc:
+            if self.live_session is not None:
+                self.live_session.abort()
+                self.live_session = None
             self.push_screen(ErrorDialog(
                 title="Recording Failed",
                 message=f"Could not start recording.",
@@ -1111,10 +1124,14 @@ class AitranscribeTUI(App[None]):
 
     def finish_recording(self) -> None:
         self.cancel_audio_probe()
-        audio = self.recorder.stop()
+        self.recorder.stop()
         self.is_recording = False
         self.is_paused = False
-        if audio is None or len(audio) == 0:
+        session = self.live_session
+        self.live_session = None
+        if self.recorder.frames_captured == 0 or session is None:
+            if session is not None:
+                session.abort()
             device = self.recorder.device_label()
             self.cancel_append_mode()
             self.latest_transcript = f"No audio recorded from '{device}'."
@@ -1132,7 +1149,11 @@ class AitranscribeTUI(App[None]):
         self.refresh_status()
         self.refresh_transcript()
         settings = self.collect_settings()
-        self.run_worker(lambda: self.process_audio_worker(audio, settings), thread=True, exclusive=True)
+        self.run_worker(lambda: self.process_audio_worker(session, settings), thread=True, exclusive=True)
+
+    def _on_live_partial_text(self, text: str) -> None:
+        """Live transcript callback from the transcriber thread."""
+        self.call_from_thread(self.update_transcript_from_worker, text)
 
     def start_file_transcription(self) -> None:
         file_path = self.query_one("#file_path", Input).value.strip()
@@ -1204,9 +1225,9 @@ class AitranscribeTUI(App[None]):
             return
         self.call_from_thread(self.processing_finished, result)
 
-    def process_audio_worker(self, audio: np.ndarray, settings: dict[str, Any]) -> None:
+    def process_audio_worker(self, session: Any, settings: dict[str, Any]) -> None:
         self._run_pipeline_worker(
-            lambda feedback, transcript_callback: self.process_audio(audio, settings, feedback, transcript_callback)
+            lambda feedback, transcript_callback: self.process_audio(session, settings, feedback, transcript_callback)
         )
 
     def process_file_worker(self, file_path: str, settings: dict[str, Any]) -> None:

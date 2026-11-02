@@ -31,6 +31,15 @@ max_upload_mb = 25
 # model         = "large-v3"
 # max_upload_s  = 900
 # max_upload_mb = 100
+# upload_format = "none"   # none (WAV, no encoding) | ogg (Opus 24k) | mp3 (32k)
+
+# ── Recording: live fragmentation ───────────────────────────────
+# Fragmenttakt: time that must elapse before a cut may be placed.
+# Suchfenster: forward span that must be fully recorded and is searched in
+# full for the quietest cut point.
+[recording]
+cut_interval_seconds = 45.0
+search_window_seconds = 5.0
 
 # ── LLM post-processing ─────────────────────────────────────────
 [llm]

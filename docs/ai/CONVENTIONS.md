@@ -79,3 +79,9 @@ Follow these without question. Do not deviate unless explicitly told.
 - Add focused unit tests for clipboard fallback helpers and TUI state-selection behavior instead of trying to verify them through live terminal automation.
 - `core.py` tests live in `tests/test_core.py` (all core functions in one file); mock `core.subprocess.run` or `core._ffmpeg` and use pytest `tmp_path` for real files — never mock `os.path` for `chunk_audio` discovery logic.
 - When a tested function closes a file handle before you can assert on it (e.g. `transcribe_audio`), capture content via a `side_effect` function instead of asserting on the call-args file object later.
+
+## 2026-11-02: Live fragmentation vocabulary (#88)
+- Use **Fragmenttakt** and **Suchfenster** in code, comments and docs (glossary: `CONTEXT.md`). Avoid "nominal window", "Fix-Fenster", "Suchspan", "Schonfrist", "guard zone", "LATE_HALF" — the last four name a concept this project deliberately does not have.
+- **Fragment** = one committed, gapless piece of a live recording. **Chunk** stays reserved for the post-hoc `chunk_audio` split of a file.
+- One STT log line per fragment request, one per API error, one summary at the stop tap; JSONL under `$XDG_STATE_HOME/aitranscribe/stt_requests.jsonl`.
+- A fragment's upload format comes from the active STT profile (`upload_format`), never from a global constant.

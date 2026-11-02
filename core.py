@@ -3,9 +3,17 @@ import os
 import re
 import subprocess
 from pathlib import Path
+
+import numpy as np
 from openai import BadRequestError, OpenAI
 
 MAX_AUDIO_SIZE_MB = 25
+
+# Fragment upload formats (see config.UPLOAD_FORMATS): `none` writes PCM WAV
+# and never invokes ffmpeg, which keeps the live path free of encoder latency.
+UPLOAD_FORMATS = ("none", "ogg", "mp3")
+_FRAGMENT_MP3_BITRATE = "32k"
+_FRAGMENT_OGG_BITRATE = "24k"
 
 # Groq assembles the transcript of long uploads incorrectly: from the first
 # non-ASCII character of a word it drops the rest of that span, so German
@@ -77,6 +85,70 @@ def compress_audio(file_path: str, output_path: str | None = None) -> str:
             f"ffmpeg reported success but produced no output: {output_path}"
         )
     return output_path
+
+
+def write_wav(filename: str, data: "np.ndarray", samplerate: int) -> None:
+    """Write a NumPy array as a 16-bit PCM WAV file using stdlib."""
+    import wave
+
+    arr = np.asarray(data)
+    if arr.dtype.kind == "f":
+        arr = (arr * 32767).astype(np.int16)
+    elif arr.dtype != np.int16:
+        arr = arr.astype(np.int16)
+    nchannels = 1 if arr.ndim == 1 else arr.shape[1]
+    with wave.open(filename, "w") as f:
+        f.setnchannels(nchannels)
+        f.setsampwidth(2)
+        f.setframerate(samplerate)
+        f.writeframes(arr.tobytes())
+
+
+def encode_fragment(
+    pcm: "np.ndarray",
+    sample_rate: int,
+    output_path: str,
+    upload_format: str = "none",
+) -> str:
+    """Write one fragment in the configured upload format.
+
+    `none` writes 16-bit PCM WAV directly — no ffmpeg, no encoder latency, and
+    nothing for the STT service to unpack. `ogg` encodes Opus at 24 kbps and
+    `mp3` MP3 at 32 kbps through ffmpeg. Returns the path actually written
+    (the suffix follows the format).
+    """
+    if upload_format not in UPLOAD_FORMATS:
+        raise ValueError(
+            f"upload_format must be one of {', '.join(UPLOAD_FORMATS)} "
+            f"(got {upload_format!r})."
+        )
+    suffix = ".wav" if upload_format == "none" else f".{upload_format}"
+    target = str(Path(output_path).with_suffix(suffix))
+    if upload_format == "none":
+        write_wav(target, pcm, sample_rate)
+        return target
+
+    wav_path = str(Path(output_path).with_suffix(".wav"))
+    write_wav(wav_path, pcm, sample_rate)
+    try:
+        if upload_format == "ogg":
+            _ffmpeg(
+                "-i", wav_path, "-map", "0:a:0", "-vn",
+                "-c:a", "libopus", "-b:a", _FRAGMENT_OGG_BITRATE, target,
+            )
+        else:
+            _ffmpeg(
+                "-i", wav_path, "-map", "0:a:0", "-vn",
+                "-b:a", _FRAGMENT_MP3_BITRATE, target,
+            )
+    finally:
+        if os.path.exists(wav_path):
+            os.remove(wav_path)
+    if not os.path.isfile(target) or os.path.getsize(target) == 0:
+        raise RuntimeError(
+            f"ffmpeg reported success but produced no output: {target}"
+        )
+    return target
 
 
 def _parse_silence_midpoints(stderr: str) -> list[float]:

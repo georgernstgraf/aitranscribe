@@ -1381,8 +1381,8 @@ def test_promptmanager_remove_prompt_success():
 
 # ==================== record_from_microphone Helper Tests ====================
 
-def test_capture_microphone_recording_returns_none_on_cancel():
-    """Cancelled recording returns None without concatenating audio."""
+def test_capture_microphone_recording_returns_false_on_cancel():
+    """Cancelled recording returns False and captures nothing."""
     import main
     cancelled_state = {"is_recording": True, "stop_event": True, "cancelled": True}
 
@@ -1393,10 +1393,11 @@ def test_capture_microphone_recording_returns_none_on_cancel():
         with patch("main.console"):
             result = main._capture_microphone_recording(verbose=False)
 
-    assert result is None
+    assert result is False
 
-def test_capture_microphone_recording_returns_none_when_empty():
-    """Recording that captures no audio returns None."""
+
+def test_capture_microphone_recording_returns_false_when_empty():
+    """Recording that captures no audio returns False."""
     import main
     stopped_state = {"is_recording": True, "stop_event": True, "cancelled": False}
 
@@ -1407,36 +1408,41 @@ def test_capture_microphone_recording_returns_none_when_empty():
         with patch("main.console") as mock_console:
             result = main._capture_microphone_recording(verbose=False)
 
-    assert result is None
+    assert result is False
     printed = " ".join(str(call.args[0]) for call in mock_console.print.call_args_list)
     assert "No audio recorded" in printed
 
-def test_capture_microphone_recording_returns_audio_data():
-    """Successful recording concatenates captured chunks into one array."""
+
+def test_capture_microphone_recording_streams_frames_into_the_sink():
+    """Captured frames go straight to the live sink at 16 kHz mono."""
     import numpy as np
     import main
     stopped_state = {"is_recording": True, "stop_event": True, "cancelled": False}
+    captured: dict = {}
 
     with patch("main._start_keyboard_listener", return_value=MagicMock()), \
          patch("main._enter_raw_terminal_mode", return_value=(5, MagicMock())), \
          patch("main._record_until_toggle") as mock_toggle, \
          patch("main.console"):
         chunks = [np.zeros((100, 1), dtype=np.int16), np.zeros((50, 1), dtype=np.int16)]
-        captured = {}
 
-        def fake_toggle(state, listener, fd, old_settings, audio_data, samplerate, channels):
+        def fake_toggle(state, listener, fd, old_settings, sink, counter, samplerate, channels):
             captured["samplerate"] = samplerate
             captured["channels"] = channels
-            audio_data.extend(chunks)
+            for chunk in chunks:
+                counter["frames"] += len(chunk)
+                sink(chunk)
             state.update(stopped_state)
 
         mock_toggle.side_effect = fake_toggle
-        result = main._capture_microphone_recording(verbose=False)
+        received: list = []
+        result = main._capture_microphone_recording(verbose=False, sink=received.append)
 
-    assert result is not None
-    assert result.shape == (150, 1)
-    assert captured["samplerate"] == 44100
+    assert result is True
+    assert len(received) == 2
+    assert captured["samplerate"] == 16000
     assert captured["channels"] == 1
+
 
 def test_capture_microphone_recording_no_input_mechanism_raises_exit():
     """No pynput listener and no terminal fd raises typer.Exit(1)."""
@@ -1450,112 +1456,97 @@ def test_capture_microphone_recording_no_input_mechanism_raises_exit():
 
     assert exc_info.value.exit_code == 1
 
-def test_persist_recording_compresses_and_removes_raw_wav(tmp_path):
-    """_persist_recording compresses to MP3 and deletes the raw WAV."""
-    import main
-    raw_wav = tmp_path / "rec.wav"
-    raw_wav.write_bytes(b"wav-bytes")
-    mp3 = tmp_path / "rec.mp3"
 
-    with patch("main.compress_audio") as mock_compress:
-        mp3.write_bytes(b"mp3-bytes")
-        main._persist_recording(str(raw_wav), str(mp3))
-
-    mock_compress.assert_called_once_with(str(raw_wav), output_path=str(mp3))
-    assert not raw_wav.exists()
-
-def test_report_recording_result_stores_final_text():
-    """_report_recording_result prints transcript and stores final text."""
+def test_report_recording_result_prints_transcript_and_llm_result():
+    """_report_recording_result only prints; the session stores the prompt."""
     import main
     with patch("main.console") as mock_console, \
-         patch("main.prompt_manager") as mock_manager, \
          patch("main.wrap_text", side_effect=lambda t: t):
-        main._report_recording_result("final text", "raw text", needs_llm=True, mp3_file="/tmp/a.mp3")
+        main._report_recording_result("final text", "raw text", needs_llm=True)
 
     printed = " ".join(str(call.args[0]) for call in mock_console.print.call_args_list)
     assert "Transcription Complete" in printed
     assert "raw text" in printed
     assert "LLM Result" in printed
     assert "final text" in printed
-    mock_manager.add_prompt.assert_called_once_with("final text", "/tmp/a.mp3")
+
 
 def test_report_recording_result_without_llm_skips_llm_output():
-    """Without needs_llm, only the raw transcript is printed and stored."""
+    """Without needs_llm, only the raw transcript is printed."""
     import main
     with patch("main.console") as mock_console, \
-         patch("main.prompt_manager") as mock_manager, \
          patch("main.wrap_text", side_effect=lambda t: t):
-        main._report_recording_result("final text", "raw text", needs_llm=False, mp3_file="/tmp/a.mp3")
+        main._report_recording_result("final text", "raw text", needs_llm=False)
 
     printed = " ".join(str(call.args[0]) for call in mock_console.print.call_args_list)
     assert "LLM Result" not in printed
     assert "raw text" in printed
-    mock_manager.add_prompt.assert_called_once_with("final text", "/tmp/a.mp3")
 
-def test_record_from_microphone_wires_pipeline_with_chunking():
-    """Orchestrator passes do_chunk=True and correct flags to the pipeline.
 
-    Long takes must be chunked: Groq mangles transcripts of uploads over ~120 s
-    (docs/ai/PITFALLS.md).
-    """
-    import numpy as np
+def test_record_from_microphone_wires_the_live_session():
+    """The orchestrator starts a live session, captures into it, then finishes."""
     import main
 
     with patch("main.validate_api_keys"), \
          patch("main.console"), \
-         patch("main._capture_microphone_recording", return_value=np.zeros((10, 1))) as mock_capture, \
-         patch("main.get_recording_file_paths", return_value=("/tmp/raw.wav", "/tmp/final.mp3")), \
-         patch("main._write_wav"), \
+         patch("main.LiveTranscriptionSession") as mock_session_cls, \
+         patch("main._capture_microphone_recording", return_value=True) as mock_capture, \
          patch("main.Progress"), \
-         patch("main._persist_recording"), \
-         patch("main.run_transcription_pipeline", return_value=("final", "raw")) as mock_pipeline, \
+         patch("main.process_live_recording", return_value={
+             "text": "final", "raw_text": "raw", "file_path": "/tmp/final.mp3", "prompt_id": "1",
+         }) as mock_process, \
          patch("main._report_recording_result") as mock_report:
+        session = mock_session_cls.return_value
         main.record_from_microphone(
             stt_model="whisper", llm_model="gpt", post_process=True, verbose=False, english=False
         )
 
-    mock_capture.assert_called_once_with(False)
-    kwargs = mock_pipeline.call_args.kwargs
-    assert kwargs["do_chunk"] is True
-    assert kwargs["needs_llm"] is True
-    assert kwargs["target_language"] is None
-    assert kwargs["stt_model"] == "whisper"
-    assert kwargs["llm_model"] == "gpt"
-    mock_report.assert_called_once_with("final", "raw", True, "/tmp/final.mp3")
+    session.start.assert_called_once()
+    assert mock_capture.call_args.kwargs["sink"] == session.add_audio
+    settings = mock_process.call_args.args[1]
+    assert settings["stt_model"] == "whisper"
+    assert settings["llm_model"] == "gpt"
+    assert settings["pre_process_mode"] == "cleanup"
+    mock_report.assert_called_once_with("final", "raw", True)
 
 
-def test_process_recorded_audio_for_tui_chunks_long_takes():
-    """The TUI recording path must chunk too, not upload the whole take."""
-    import main
-
-    with patch.object(main, "prompt_manager", MagicMock()), \
-         patch("main.validate_api_keys"), \
-         patch("main._write_wav"), \
-         patch("main.get_recording_file_paths", return_value=("/tmp/raw.wav", "/tmp/final.mp3")), \
-         patch("main.compress_audio"), \
-         patch("main.os.path.exists", return_value=False), \
-         patch("main.run_transcription_pipeline", return_value=("final", "raw")) as mock_pipeline:
-        main.process_recorded_audio_for_tui(MagicMock(), {"pre_process_mode": "raw"})
-
-    assert mock_pipeline.call_args.kwargs["do_chunk"] is True
-
-def test_record_from_microphone_returns_early_when_capture_cancelled():
-    """Cancelled capture skips file writing, pipeline, and reporting."""
+def test_record_from_microphone_aborts_the_session_when_capture_cancelled():
+    """A cancelled capture aborts the session and skips the pipeline."""
     import main
 
     with patch("main.validate_api_keys"), \
          patch("main.console"), \
-         patch("main._capture_microphone_recording", return_value=None), \
-         patch("main.get_recording_file_paths") as mock_paths, \
-         patch("main._write_wav") as mock_write, \
-         patch("main.run_transcription_pipeline") as mock_pipeline:
+         patch("main.LiveTranscriptionSession") as mock_session_cls, \
+         patch("main._capture_microphone_recording", return_value=False), \
+         patch("main.process_live_recording") as mock_process:
         main.record_from_microphone(
             stt_model="whisper", llm_model="gpt", post_process=False, verbose=False, english=False
         )
 
-    mock_paths.assert_not_called()
-    mock_write.assert_not_called()
-    mock_pipeline.assert_not_called()
+    mock_session_cls.return_value.abort.assert_called_once()
+    mock_process.assert_not_called()
+
+
+def test_process_live_recording_delivers_raw_text_and_archives(tmp_path):
+    """The TUI path drains the session, archives the MP3 and stores the prompt."""
+    import main
+
+    session = MagicMock()
+    session.finish.return_value = "raw text"
+    session.detected_language = "de"
+
+    with patch.object(main, "prompt_manager", MagicMock()) as mock_manager, \
+         patch("main.validate_api_keys"), \
+         patch("main.get_recording_file_paths", return_value=("/tmp/raw.wav", "/tmp/final.mp3")), \
+         patch("main.wrap_text", side_effect=lambda t, width=None: t):
+        result = main.process_live_recording(session, {"pre_process_mode": "raw"})
+
+    session.finish.assert_called_once()
+    session.write_archive_mp3.assert_called_once_with("/tmp/final.mp3")
+    session.cleanup.assert_called_once()
+    mock_manager.add_prompt.assert_called_once_with("raw text", "/tmp/final.mp3")
+    assert result["raw_text"] == "raw text"
+    assert result["file_path"] == "/tmp/final.mp3"
 
 
 # --- profile-based configuration (schema v2) ---

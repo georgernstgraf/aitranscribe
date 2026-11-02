@@ -456,3 +456,92 @@ def test_process_with_llm_zero_choices_raises():
         process_with_llm(client, [], "test-model")
     assert "no choices" in exc_info.value.args[0]
     assert "test-model" in exc_info.value.args[0]
+
+
+# --- write_wav / encode_fragment ---
+
+import numpy as np
+import wave
+
+from core import encode_fragment, write_wav
+
+
+def _tone(seconds=0.5, sample_rate=16000, amplitude=8000):
+    t = np.arange(int(seconds * sample_rate)) / sample_rate
+    return (amplitude * np.sin(2 * np.pi * 220 * t)).astype(np.int16)
+
+
+def test_write_wav_round_trips_pcm(tmp_path):
+    target = tmp_path / "tone.wav"
+    pcm = _tone()
+
+    write_wav(str(target), pcm, 16000)
+
+    with wave.open(str(target), "rb") as fh:
+        assert fh.getnchannels() == 1
+        assert fh.getsampwidth() == 2
+        assert fh.getframerate() == 16000
+        assert fh.getnframes() == len(pcm)
+
+
+def test_write_wav_scales_float_input(tmp_path):
+    target = tmp_path / "float.wav"
+    write_wav(str(target), np.array([0.0, 0.5, -0.5], dtype=np.float32), 16000)
+
+    with wave.open(str(target), "rb") as fh:
+        frames = np.frombuffer(fh.readframes(3), dtype=np.int16)
+    assert frames[0] == 0
+    assert frames[1] == 16383
+    assert frames[2] == -16383
+
+
+def test_encode_fragment_none_writes_wav_without_ffmpeg(tmp_path):
+    target = tmp_path / "frag_000.wav"
+
+    with patch("core._ffmpeg") as mock_ffmpeg:
+        result = encode_fragment(_tone(), 16000, str(target), "none")
+
+    assert result == str(target)
+    assert target.exists()
+    mock_ffmpeg.assert_not_called()
+
+
+def test_encode_fragment_mp3_uses_ffmpeg_and_removes_temp_wav(tmp_path):
+    target = tmp_path / "frag_000.wav"
+
+    def fake_ffmpeg(*args):
+        Path(args[-1]).write_bytes(b"mp3-bytes")
+
+    with patch("core._ffmpeg", side_effect=fake_ffmpeg) as mock_ffmpeg:
+        result = encode_fragment(_tone(), 16000, str(target), "mp3")
+
+    assert result == str(tmp_path / "frag_000.mp3")
+    assert Path(result).exists()
+    assert not (tmp_path / "frag_000.wav").exists()
+    assert "-b:a" in mock_ffmpeg.call_args.args
+    assert "32k" in mock_ffmpeg.call_args.args
+
+
+def test_encode_fragment_ogg_uses_libopus(tmp_path):
+    target = tmp_path / "frag_000.wav"
+
+    def fake_ffmpeg(*args):
+        Path(args[-1]).write_bytes(b"ogg-bytes")
+
+    with patch("core._ffmpeg", side_effect=fake_ffmpeg) as mock_ffmpeg:
+        result = encode_fragment(_tone(), 16000, str(target), "ogg")
+
+    assert result == str(tmp_path / "frag_000.ogg")
+    assert "libopus" in mock_ffmpeg.call_args.args
+    assert "24k" in mock_ffmpeg.call_args.args
+
+
+def test_encode_fragment_rejects_unknown_format(tmp_path):
+    with pytest.raises(ValueError, match="upload_format must be one of"):
+        encode_fragment(_tone(), 16000, str(tmp_path / "f.wav"), "flac")
+
+
+def test_encode_fragment_raises_when_ffmpeg_produces_nothing(tmp_path):
+    with patch("core._ffmpeg"):
+        with pytest.raises(RuntimeError, match="produced no output"):
+            encode_fragment(_tone(), 16000, str(tmp_path / "f.wav"), "mp3")

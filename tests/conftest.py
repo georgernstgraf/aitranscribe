@@ -30,6 +30,7 @@ _ISOLATED_PATHS = {
     "LEGACY_CONFIG_FILE": TEST_CONFIG_DIR / "aitranscribe.conf",
     "PROMPTS_FILE": TEST_CONFIG_DIR / "prompts.sqlite",
     "PROMPTS_CONFIG": TEST_CONFIG_DIR / "prompts.toml",
+    "STT_LOG_FILE": TEST_CONFIG_DIR / "stt_requests.jsonl",
 }
 
 

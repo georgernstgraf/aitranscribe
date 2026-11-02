@@ -78,3 +78,11 @@ Read this file carefully before making changes in affected areas.
 - `build_post_process_messages()` substitutes only `{{text}}` in the user template (plus `{{source_language_clause}}`/`{{target_language_clause}}` in the system prompt). A customized template that still carries the pre-#73 `{{translate}}` placeholder sends that literal token to the LLM.
 - `aitranscribe config check --probe` only verifies the endpoint is reachable and warns when the configured model is missing from `/v1/models` — it does **not** fail. A deprecated OpenRouter model therefore passes the probe and fails at call time with `NotFoundError` 404 (2026-10-27: `anthropic/claude-3-haiku`, "deprecated on Sep 10, 2026"). Treat the probe's model warning as an error and test the model with one real completion.
 - A `config.toml` whose `api_key` still holds a `…your…here` placeholder looks healthy in `config show` (`your…here`) and only fails at the first API call. Check the masked suffix after copying a config between hosts.
+
+## 2026-11-02: Live fragmentation constraints (#88)
+- **The fragmenter waits for the full Suchfenster before deciding.** A cut is only placed once `cut_interval + search_window` of audio exists, so the tail fragment at the stop tap can be as long as that sum (50 s at 45/5). That is the stop→raw bound — do not "optimise" it away without changing the model.
+- **A 10 ms dip below the axis is a candidate.** SilenceQuality's forced cut only applies when *no* frame is below `X = 0.65·mean + 100`; a single quiet frame already counts as a (weak) candidate. Tests that expect `candidate_found is False` must use a signal whose every frame sits above the axis.
+- **The high-pass must not normalise.** Normalisation scales the frame levels and therefore moves the adaptive axis; `high_pass()` is deliberately bare.
+- **`upload_format` belongs to the profile.** Never add a scope-level override (the repo rule is one value, one place).
+- **`STT_LOG_FILE` is part of the test isolation contract.** `tests/conftest.py` repoints it; a new default path must be added there too or the suite writes into `$HOME`.
+- **The TUI only creates a live session when `live_session_factory` is injected.** Tests that call `start_recording()` without it get no session (and `finish_recording()` treats that as "no audio").
