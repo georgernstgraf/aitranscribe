@@ -1537,6 +1537,7 @@ def _print_endpoint(endpoint: config.Endpoint, *, reveal: bool) -> None:
         console.print("    api_key        <missing>", markup=False)
     if endpoint.scope == config.STT:
         console.print(f"    chunk limits   {endpoint.max_upload_s} s / {endpoint.max_upload_mb} MB", markup=False)
+        console.print(f"    upload format  {endpoint.upload_format}", markup=False)
 
 
 def _print_config(app_config: config.AppConfig, *, reveal: bool) -> None:
@@ -1552,6 +1553,9 @@ def _print_config(app_config: config.AppConfig, *, reveal: bool) -> None:
     console.print(f"  [ui] mode={ui.get('pre_process_mode', DEFAULT_PRE_PROCESS_MODE)} "
                   f"width={ui.get('output_width', DEFAULT_OUTPUT_WIDTH)} "
                   f"verbose={bool(ui.get('verbose_errors', False))}", markup=False)
+    recording = app_config.recording
+    console.print(f"  [recording] fragmenttakt={recording.cut_interval_s:g}s "
+                  f"suchfenster={recording.search_window_s:g}s", markup=False)
     if app_config.prompts_file:
         console.print(f"  [paths] prompts_file={app_config.prompts_file}", markup=False)
 
