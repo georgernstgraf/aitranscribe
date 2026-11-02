@@ -61,8 +61,12 @@ class Fragment:
     sample_rate: int
     start_sample: int
     end_sample: int
-    silence_aligned: bool
     quality: float
+
+    @property
+    def silence_aligned(self) -> bool:
+        """A qualifying silence candidate was found (derived, never stored)."""
+        return self.quality > 0
 
     @property
     def duration_ms(self) -> int:
@@ -320,14 +324,14 @@ class FragmentPreparer:
                 margin_ms=self.margin_ms,
             )
             if result is None:  # pragma: no cover - window is always >= one frame
-                cut, aligned, quality = nominal_end, False, 0.0
+                cut, quality = nominal_end, 0.0
             else:
                 cut = nominal_end + result.cut_offset_samples
-                aligned, quality = result.candidate_found, result.quality
-            self._commit(start, cut, aligned, quality)
+                quality = result.quality
+            self._commit(start, cut, quality)
             committed = True
 
-    def _commit(self, start: int, end: int, aligned: bool, quality: float) -> None:
+    def _commit(self, start: int, end: int, quality: float) -> None:
         pcm = self._slice(start, end)
         fragment = Fragment(
             index=self._next_index,
@@ -335,7 +339,6 @@ class FragmentPreparer:
             sample_rate=self.sample_rate,
             start_sample=start,
             end_sample=end,
-            silence_aligned=aligned,
             quality=quality,
         )
         self._next_index += 1
@@ -355,4 +358,4 @@ class FragmentPreparer:
         total = self.pcm_size()
         self._closed = True
         if total > start:
-            self._commit(start, total, aligned=False, quality=0.0)
+            self._commit(start, total, 0.0)

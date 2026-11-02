@@ -50,20 +50,35 @@ A fragment boundary — the place where one fragment's audio ends and the next
 begins.
 _Avoid_: Seam point, splice
 
+**Q-Gate**:
+The threshold `[recording].seam_quality_min`. A naht is conditioned only when
+the Q of its cut is below it; forced cuts (Q = 0) always are. The gate is
+evaluated in exactly one place, the serial transcriber.
+_Avoid_: Stitch policy, quality gate
+
+**Konditionierte Naht**:
+A naht below the Q-Gate: it gets pre-roll, prompt carry-over and echo trim.
+_Avoid_: Stitched seam, overlap seam
+
+**Nackte Naht**:
+A naht at or above the Q-Gate: the upload is the bare fragment — no pre-roll,
+no prompt, no trim.
+_Avoid_: Unstitched seam, bare seam
+
 **Pre-roll**:
 The last second of the previous fragment's audio, prepended to the next upload
-so the service hears the words on both sides of the naht.
+at a conditioned naht so the service hears the words on both sides of it.
 _Avoid_: Overlap, context audio
 
 **Prompt-Carry-over**:
 The seam-local prompt built from the previous transcript tail (≤96 characters,
-cut at a word boundary).
+cut at a word boundary), sent at a conditioned naht.
 _Avoid_: Context prompt, carry prompt
 
 **Echo-Trim**:
 Removal of a transcript head that repeats the previous transcript tail (≤8
-tokens, head token must match, at most one mismatch for k ≥ 2). Without a match
-everything is kept.
+tokens, head token must match, at most one mismatch for k ≥ 2) at a conditioned
+naht. Without a match everything is kept; a naked naht never trims.
 _Avoid_: Deduplication, overlap trim
 
 ### Transcription

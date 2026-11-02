@@ -92,3 +92,9 @@ Read this file carefully before making changes in affected areas.
 - **Punctuation counts as a token mismatch.** `Schnitt` vs `Schnitt.` is one mismatch; two such differences exceed the tolerance and nothing is trimmed (conservative by design). Do not "fix" this by stripping punctuation without a decision — the conservative direction is the safety guarantee.
 - **A prompt rejection is a session-wide switch.** `on_prompt_rejected` sets `_prompts_enabled = False`; do not retry prompts per fragment.
 - **The pre-roll makes the upload ~1 s longer.** `request_bytes` in the log includes it; the `pre_roll_ms` field records it per fragment.
+
+## 2026-11-02: Q-gate for seam conditioning (#90)
+- **Q belongs to the seam, not the fragment.** The seam before fragment *i* is fragment *i−1*'s end cut, so `seam_quality = fragment[i-1].quality`. The rest fragment has no end cut of its own (Q = 0, `silence_aligned` False) but inherits the last real cut's Q for its *seam*. Do not "fix" the tail's own quality.
+- **A naked seam must never trim.** Without pre-roll there is no echo, so a removed head could only eat a real repetition. `_transcribe_fragment` trims only when `conditioned` is true.
+- **`seam_quality_min = 0` means "never condition"** because the comparison is strict `<`. Do not turn it into `<=`.
+- **The gate is decided once**, in `_transcribe_loop`; `_transcribe_fragment` receives `conditioned` and must not re-derive it.

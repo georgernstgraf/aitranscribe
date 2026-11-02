@@ -17,6 +17,7 @@ from fragmenter import (
     DEFAULT_AXIS_C,
     DEFAULT_AXIS_K,
     FRAME_MS,
+    Fragment,
     FragmentPreparer,
     evaluate,
     frame_levels,
@@ -223,6 +224,23 @@ def test_tail_is_taken_whole_and_unsearched():
     assert tail.quality == 0.0
     assert tail.end_sample == len(pcm)
     assert tail.duration_ms < cut_interval_s * 1000
+
+
+def test_silence_aligned_is_derived_from_quality():
+    pcm = np.zeros(SR, dtype=np.int16)
+
+    def fragment(quality: float) -> Fragment:
+        return Fragment(
+            index=0,
+            pcm=pcm,
+            sample_rate=SR,
+            start_sample=0,
+            end_sample=SR,
+            quality=quality,
+        )
+
+    assert fragment(0.5).silence_aligned is True
+    assert fragment(0.0).silence_aligned is False
 
 
 def test_cut_lands_in_a_pause_of_the_search_window():

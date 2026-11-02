@@ -180,6 +180,7 @@ model   = "openai/gpt-oss-120b"
 [recording]
 cut_interval_seconds = 45.0      # Fragmenttakt
 search_window_seconds = 5.0      # Suchfenster
+seam_quality_min = 10.0          # Q-Gate for seam conditioning (0 = never)
 
 [ui]
 pre_process_mode = "raw"         # raw, cleanup, or english
@@ -226,12 +227,26 @@ whole take. Every request appends one JSONL line to
 duration, upload format, request bytes, request duration), API errors get their
 own lines, and the stop tap writes a summary line.
 
-**Seam conditioning** (`seam.py`): every fragment seam gets the last second of
-the previous fragment as acoustic pre-roll, a prompt built from the previous
+**Seam conditioning** (`seam.py`) is **Q-gated**: a naht is conditioned only
+when the Q of its cut is below `[recording].seam_quality_min` (default `10`,
+i.e. ≈0.1 s of full silence). A conditioned naht gets the last second of the
+previous fragment as acoustic pre-roll, a prompt built from the previous
 transcript tail (≤96 characters), and an echo trim that removes a transcript
 head repeating the previous tail (≤8 tokens, head token must match, one
-mismatch tolerated). A service that rejects the prompt with HTTP 400 is retried
-without it, and prompts are disabled for the rest of the session.
+mismatch tolerated). Every other naht stays **naked**: the upload is the bare
+fragment — no pre-roll, no prompt, no trim, so a real repetition is never
+eaten. Forced cuts (Q = 0) always condition.
+
+The default is deliberately low. Measured on real dictations, pause-aligned
+cuts sit at Q 130–600 while forced cuts sit at Q 0; the seam study of the
+sister project found that conditioning ordinary pauses *increases* errors.
+Raise the value (50 or 100) only if you want more pauses conditioned. A service
+that rejects the prompt with HTTP 400 is retried without it, and prompts are
+disabled for the rest of the session.
+
+The JSONL log records `quality` (the fragment's own end cut), `seam_quality`
+(the predecessor's cut, i.e. the Q the gate saw), `conditioned`,
+`prompt_chars`, `pre_roll_ms` and `echo_trimmed_tokens` per request.
 
 ### Built-in provider defaults
 

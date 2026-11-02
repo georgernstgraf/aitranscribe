@@ -77,6 +77,14 @@ DEFAULT_CUT_INTERVAL_S = 45.0
 DEFAULT_SEARCH_WINDOW_S = 5.0
 MIN_SEARCH_WINDOW_S = 0.5
 
+# Q-gate for seam conditioning: a seam is conditioned (pre-roll + prompt +
+# echo trim) only when its Q is below this value. Q counts 10 ms frames of full
+# silence, so 10 ≈ 0.1 s. Deliberately low: only forced cuts (Q = 0) and very
+# weak pauses are conditioned. Measured real pause-aligned cuts sit at Q
+# 130–600, so a higher value would condition ordinary pauses — the seam study
+# says that makes transcripts worse.
+DEFAULT_SEAM_QUALITY_MIN = 10.0
+
 # Built-in defaults so a known provider id works without a base_url line.
 # A profile may override every field. Unknown ids must supply base_url/model.
 PROVIDER_DEFAULTS: dict[str, dict[str, Any]] = {
@@ -183,6 +191,7 @@ class RecordingSettings:
 
     cut_interval_s: float = DEFAULT_CUT_INTERVAL_S
     search_window_s: float = DEFAULT_SEARCH_WINDOW_S
+    seam_quality_min: float = DEFAULT_SEAM_QUALITY_MIN
 
 
 @dataclass(frozen=True)
@@ -352,7 +361,29 @@ def _load_recording(raw: dict[str, Any]) -> RecordingSettings:
             "[recording].search_window_seconds must not exceed "
             "[recording].cut_interval_seconds."
         )
-    return RecordingSettings(cut_interval_s=cut_interval, search_window_s=search_window)
+    seam_quality_min = _non_negative_float(
+        section.get("seam_quality_min"),
+        DEFAULT_SEAM_QUALITY_MIN,
+        "[recording].seam_quality_min",
+    )
+    return RecordingSettings(
+        cut_interval_s=cut_interval,
+        search_window_s=search_window,
+        seam_quality_min=seam_quality_min,
+    )
+
+
+def _non_negative_float(value: Any, default: float, label: str) -> float:
+    """A float >= 0 (0 is meaningful: the strict gate then conditions nothing)."""
+    if value is None:
+        return default
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ConfigError(f"{label} must be a number.") from exc
+    if parsed < 0:
+        raise ConfigError(f"{label} must not be negative.")
+    return parsed
 
 
 def _positive_float(value: Any, default: float, label: str) -> float:
@@ -565,6 +596,16 @@ def render_document(
         "search_window_seconds = "
         f"{_toml_value(recording_values.get('search_window_seconds', DEFAULT_SEARCH_WINDOW_S))}"
     )
+    lines.extend([
+        "# Seam-Q-Gate: condition a seam (pre-roll + prompt + echo trim) only",
+        "# when its Q is below this value. Q counts 10 ms frames of full silence",
+        "# (10 ≈ 0.1 s). Measured on real dictations: pause-aligned cuts sit at",
+        "# Q 130–600, forced cuts at Q 0. 10 is the provisional value from the",
+        "# original; 50 or 100 condition more pauses — the seam study says that",
+        "# makes transcripts worse.",
+        "seam_quality_min = "
+        f"{_toml_value(recording_values.get('seam_quality_min', DEFAULT_SEAM_QUALITY_MIN))}",
+    ])
     lines.extend([
         "",
         "# ── UI / runtime ────────────────────────────────────────────────",

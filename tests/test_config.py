@@ -341,14 +341,33 @@ def test_recording_defaults(tmp_path):
 
     assert cfg.recording.cut_interval_s == 45.0
     assert cfg.recording.search_window_s == 5.0
+    assert cfg.recording.seam_quality_min == 10.0
 
 
-def test_recording_reads_both_timings(tmp_path):
-    text = MINIMAL + "\n[recording]\ncut_interval_seconds = 30\nsearch_window_seconds = 2.5\n"
+def test_recording_reads_all_values(tmp_path):
+    text = (
+        MINIMAL
+        + "\n[recording]\ncut_interval_seconds = 30\nsearch_window_seconds = 2.5\n"
+        + "seam_quality_min = 50\n"
+    )
     cfg = config.load(write(tmp_path / "config.toml", text), environ={})
 
     assert cfg.recording.cut_interval_s == 30.0
     assert cfg.recording.search_window_s == 2.5
+    assert cfg.recording.seam_quality_min == 50.0
+
+
+def test_recording_accepts_a_zero_seam_quality_min(tmp_path):
+    text = MINIMAL + "\n[recording]\nseam_quality_min = 0\n"
+    cfg = config.load(write(tmp_path / "config.toml", text), environ={})
+
+    assert cfg.recording.seam_quality_min == 0.0
+
+
+def test_recording_rejects_a_negative_seam_quality_min(tmp_path):
+    text = MINIMAL + "\n[recording]\nseam_quality_min = -1\n"
+    with pytest.raises(config.ConfigError, match="must not be negative"):
+        config.load(write(tmp_path / "config.toml", text), environ={})
 
 
 def test_recording_rejects_window_larger_than_interval(tmp_path):
@@ -377,6 +396,8 @@ def test_create_default_renders_recording_section(tmp_path):
     assert "[recording]" in text
     assert "cut_interval_seconds = 45.0" in text
     assert "search_window_seconds = 5.0" in text
+    assert "seam_quality_min = 10.0" in text
+    assert "# Seam-Q-Gate" in text
     assert 'upload_format = "none"' in text  # in the commented self-hosted example
 
     cfg = config.load(path, environ={})

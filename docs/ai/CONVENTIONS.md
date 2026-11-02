@@ -89,3 +89,8 @@ Follow these without question. Do not deviate unless explicitly told.
 ## 2026-11-02: Seam vocabulary (#89)
 - **Naht**, **Pre-roll**, **Prompt-Carry-over**, **Echo-Trim** are the canonical terms (glossary: `CONTEXT.md`). Avoid "overlap", "context audio", "deduplication".
 - Seam conditioning lives in `seam.py` (`seam_prompt`, `trim_echo`) and is applied by the serial transcriber in `LiveTranscriptionSession._transcribe_loop`.
+
+## 2026-11-02: Seam Q-gate vocabulary (#90)
+- **Q-Gate**, **konditionierte Naht**, **nackte Naht** are the canonical terms (glossary: `CONTEXT.md`). Avoid "stitch policy", "stitched seam", "unstitched seam".
+- `Fragment.silence_aligned` is derived (`quality > 0`) and never stored.
+- Seam conditioning is all-or-nothing per seam: pre-roll, prompt and trim are decided together in `LiveTranscriptionSession._transcribe_loop`.

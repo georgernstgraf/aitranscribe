@@ -1026,8 +1026,10 @@ class LiveTranscriptionSession:
         self._log = stt_log.SttRequestLog(log_path or STT_LOG_FILE)
         self._started_at = time.monotonic()
         self._finished = False
-        # Seam conditioning (seam.py): pre-roll length and prompt availability.
+        # Seam conditioning (seam.py): pre-roll length, prompt availability and
+        # the Q-gate threshold below which a seam is conditioned.
         self._pre_roll_samples = int(round(seam.PRE_ROLL_SECONDS * RECORDING_SAMPLE_RATE))
+        self._seam_quality_min = float(recording.seam_quality_min)
         self._prompts_enabled = True
 
         self.fragmenter = FragmentPreparer(
@@ -1108,18 +1110,26 @@ class LiveTranscriptionSession:
         self._queue.put(fragment)
 
     def _transcribe_loop(self) -> None:
-        """Serial consumer: compose the seam upload, transcribe, trim the echo."""
+        """Serial consumer: gate the seam, compose the upload, transcribe, trim."""
         previous_text = ""
         previous_tail: np.ndarray | None = None
+        previous_quality = 0.0
         while True:
             item = self._queue.get()
             try:
                 if item is None:
                     return
                 fragment = item
-                pre_roll = previous_tail if fragment.index > 0 else None
+                # The seam before fragment i is fragment i-1's end cut. The
+                # tail fragment has no end cut of its own, so its seam quality
+                # is the last real cut's Q (previous_quality).
+                seam_quality = previous_quality if fragment.index > 0 else 0.0
+                conditioned = (
+                    fragment.index > 0 and seam_quality < self._seam_quality_min
+                )
+                pre_roll = previous_tail if conditioned else None
                 prompt = None
-                if fragment.index > 0 and self._prompts_enabled:
+                if conditioned and self._prompts_enabled:
                     prompt = seam.seam_prompt(previous_text)
                 pcm = fragment.pcm
                 if pre_roll is not None:
@@ -1134,16 +1144,24 @@ class LiveTranscriptionSession:
                     int(round(len(pre_roll) * 1000 / fragment.sample_rate))
                     if pre_roll is not None else 0
                 )
-                text = self._transcribe_fragment(
-                    fragment, path, prompt=prompt, pre_roll_ms=pre_roll_ms
+                result = self._transcribe_fragment(
+                    fragment,
+                    path,
+                    prompt=prompt,
+                    pre_roll_ms=pre_roll_ms,
+                    seam_quality=seam_quality,
+                    conditioned=conditioned,
+                    previous_text=previous_text,
                 )
-                if text is not None:
-                    trimmed = seam.trim_echo(text, previous_text) if previous_text else text
+                if result is not None:
+                    raw_text, trimmed = result
                     self._record_text(fragment.index, trimmed)
-                    # The echo of the NEXT seam repeats this fragment's audio tail,
-                    # so the untrimmed text is what the next seam is compared to.
-                    previous_text = text
+                    # The echo of the NEXT seam repeats this fragment's audio
+                    # tail, so the untrimmed text is what the next seam is
+                    # compared to.
+                    previous_text = raw_text
                 previous_tail = fragment.pcm[-self._pre_roll_samples:].copy()
+                previous_quality = fragment.quality
             finally:
                 self._queue.task_done()
 
@@ -1161,7 +1179,10 @@ class LiveTranscriptionSession:
         *,
         prompt: str | None = None,
         pre_roll_ms: int = 0,
-    ) -> str | None:
+        seam_quality: float = 0.0,
+        conditioned: bool = False,
+        previous_text: str = "",
+    ) -> tuple[str, str] | None:
         request_bytes = stt_log.estimate_request_bytes(path, self.stt_model, prompt or "")
         started = time.perf_counter()
         try:
@@ -1189,6 +1210,12 @@ class LiveTranscriptionSession:
             if os.path.exists(path):
                 os.remove(path)
 
+        # A bare seam never trims: without pre-roll there is no echo, so a
+        # removed head could only eat a real repetition.
+        trimmed, echo_trimmed_tokens = text, 0
+        if conditioned and previous_text:
+            trimmed, echo_trimmed_tokens = seam.trim_echo(text, previous_text)
+
         duration_ms = int((time.perf_counter() - started) * 1000)
         self._request_bytes += request_bytes
         self._request_ms += duration_ms
@@ -1202,13 +1229,16 @@ class LiveTranscriptionSession:
             duration_ms=duration_ms,
             silence_aligned=fragment.silence_aligned,
             quality=fragment.quality,
+            seam_quality=seam_quality,
+            conditioned=conditioned,
             prompt_chars=len(prompt or ""),
             pre_roll_ms=pre_roll_ms,
+            echo_trimmed_tokens=echo_trimmed_tokens,
         )
         with self._lock:
             if self.detected_language is None and language:
                 self.detected_language = language
-        return text
+        return text, trimmed
 
     def _disable_prompts(self) -> None:
         """The service rejected the prompt: stop sending them for this session."""
@@ -1605,7 +1635,8 @@ def _print_config(app_config: config.AppConfig, *, reveal: bool) -> None:
                   f"verbose={bool(ui.get('verbose_errors', False))}", markup=False)
     recording = app_config.recording
     console.print(f"  [recording] fragmenttakt={recording.cut_interval_s:g}s "
-                  f"suchfenster={recording.search_window_s:g}s", markup=False)
+                  f"suchfenster={recording.search_window_s:g}s "
+                  f"seam_quality_min={recording.seam_quality_min:g}", markup=False)
     if app_config.prompts_file:
         console.print(f"  [paths] prompts_file={app_config.prompts_file}", markup=False)
 

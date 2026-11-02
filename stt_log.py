@@ -64,8 +64,11 @@ class SttRequestLog:
         duration_ms: int,
         silence_aligned: bool,
         quality: float,
+        seam_quality: float = 0.0,
+        conditioned: bool = False,
         prompt_chars: int = 0,
         pre_roll_ms: int = 0,
+        echo_trimmed_tokens: int = 0,
     ) -> None:
         """One successfully answered fragment request."""
         self._write(
@@ -80,8 +83,11 @@ class SttRequestLog:
                 "duration_ms": duration_ms,
                 "silence_aligned": silence_aligned,
                 "quality": round(float(quality), 3),
+                "seam_quality": round(float(seam_quality), 3),
+                "conditioned": conditioned,
                 "prompt_chars": prompt_chars,
                 "pre_roll_ms": pre_roll_ms,
+                "echo_trimmed_tokens": echo_trimmed_tokens,
             }
         )
 

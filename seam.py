@@ -13,7 +13,8 @@ fragment's transcript:
   a match is removed so the pre-roll does not produce duplicated words.
 
 The original gates these measures behind its silence-quality threshold; this
-project applies them at every seam until its own data justifies a gate.
+project now ports that gate: a seam is conditioned only when its Q is below
+`[recording].seam_quality_min` (`main.LiveTranscriptionSession`).
 """
 
 from __future__ import annotations
@@ -38,17 +39,22 @@ def seam_prompt(previous_text: str, max_chars: int = SEAM_PROMPT_MAX_CHARS) -> s
     return tail or None
 
 
-def trim_echo(text: str, previous_text: str, max_tokens: int = ECHO_MAX_TOKENS) -> str:
+def trim_echo(
+    text: str, previous_text: str, max_tokens: int = ECHO_MAX_TOKENS
+) -> tuple[str, int]:
     """Remove a transcript head that repeats the previous transcript's tail.
 
     Conservative by design: the first token must match exactly, longer matches
     tolerate one mismatch, and without a match everything is kept. The pre-roll
     makes the service repeat the seam words; this removes exactly that echo.
+
+    Returns ``(text, removed_tokens)`` so the STT log can record how much the
+    trim actually ate.
     """
     tokens = (text or "").split()
     previous = (previous_text or "").split()
     if not tokens or not previous:
-        return text
+        return text, 0
 
     limit = min(max_tokens, len(tokens), len(previous))
     for size in range(limit, 0, -1):
@@ -60,5 +66,5 @@ def trim_echo(text: str, previous_text: str, max_tokens: int = ECHO_MAX_TOKENS) 
             1 for left, right in zip(head, tail) if left.lower() != right.lower()
         )
         if mismatches == 0 or (size >= 2 and mismatches <= 1):
-            return " ".join(tokens[size:]).strip()
-    return text
+            return " ".join(tokens[size:]).strip(), size
+    return text, 0

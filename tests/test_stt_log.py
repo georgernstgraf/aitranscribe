@@ -26,6 +26,11 @@ def test_request_line_carries_every_field(tmp_path):
         duration_ms=2_310,
         silence_aligned=True,
         quality=12.5,
+        seam_quality=3.5,
+        conditioned=True,
+        prompt_chars=42,
+        pre_roll_ms=1000,
+        echo_trimmed_tokens=2,
     )
 
     (record,) = read_lines(tmp_path / "stt.jsonl")
@@ -39,6 +44,11 @@ def test_request_line_carries_every_field(tmp_path):
     assert record["duration_ms"] == 2_310
     assert record["silence_aligned"] is True
     assert record["quality"] == 12.5
+    assert record["seam_quality"] == 3.5
+    assert record["conditioned"] is True
+    assert record["prompt_chars"] == 42
+    assert record["pre_roll_ms"] == 1000
+    assert record["echo_trimmed_tokens"] == 2
     assert "ts" in record
 
 

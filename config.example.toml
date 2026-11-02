@@ -40,6 +40,12 @@ max_upload_mb = 25
 [recording]
 cut_interval_seconds = 45.0
 search_window_seconds = 5.0
+# Seam-Q-Gate: condition a seam (pre-roll + prompt + echo trim) only when its
+# Q is below this value. Q counts 10 ms frames of full silence (10 ≈ 0.1 s).
+# Measured on real dictations: pause-aligned cuts sit at Q 130–600, forced
+# cuts at Q 0. 10 is the provisional value from the original; 50 or 100
+# condition more pauses — the seam study says that makes transcripts worse.
+seam_quality_min = 10.0
 
 # ── LLM post-processing ─────────────────────────────────────────
 [llm]

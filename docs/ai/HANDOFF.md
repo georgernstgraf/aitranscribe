@@ -1,18 +1,20 @@
 # Handoff
 
-## 2026-11-02 session: seam conditioning (#89, follow-up of #88)
-- Shipped `seam.py`: `seam_prompt()` (previous transcript tail, ≤96 chars,
-  word-aligned) and `trim_echo()` (≤8 tokens, head token must match, ≤1
-  mismatch for k≥2, no match keeps everything).
-- `LiveTranscriptionSession._transcribe_loop` now composes `pre_roll +
-  fragment` as one upload (1 s pre-roll), sends the prompt, and trims the echo
-  against the **untrimmed** previous transcript. `core.transcribe_audio` gained
-  `prompt` and `on_prompt_rejected` (HTTP 400 → retry bare, prompts off for the
-  session).
-- Log lines gained `prompt_chars` and `pre_roll_ms`.
-- 331 tests green; real end-to-end against selfhosted-1 shows pre_roll 1000 ms,
-  prompts 41–54 chars, no duplicated seam words.
-- No pending implementation tasks.
+## 2026-11-02 session: Q-gate for seam conditioning (#90, follow-up of #89)
+- `fragmenter.Fragment.silence_aligned` is now derived (`quality > 0`); the
+  stored field is gone. `prepare_tail_sync` still commits the tail with Q = 0.
+- `seam.trim_echo` returns `(text, removed_tokens)`.
+- `LiveTranscriptionSession._transcribe_loop` evaluates the gate per seam:
+  `seam_quality = previous_quality` (fragment i−1's end cut; 0 for fragment 0),
+  `conditioned = index > 0 and seam_quality < CONFIG.recording.seam_quality_min`.
+  Pre-roll, prompt and trim are applied only when conditioned; `previous_text`
+  and `previous_tail` are maintained for every fragment so a later conditioned
+  seam still has context.
+- `config.RecordingSettings.seam_quality_min` (default 10, `>= 0`) is parsed,
+  rendered in `render_document`/`config.example.toml` with a comment block and
+  shown in `config show`.
+- STT request lines gained `seam_quality`, `conditioned`, `echo_trimmed_tokens`.
+- 340 tests green (was 331). No pending implementation tasks.
 
 ## Notes for the next agent
 - Never add a scope-level override (e.g. `[stt].model`): one value, one place —
@@ -22,8 +24,9 @@
   the stop→raw bound, not a bug.
 - Echo trim compares against the untrimmed previous transcript; comparing
   against the trimmed text cascades (see PITFALLS).
-- The seam measures are unconditional. The original's `Q < qualityMin` gate is
-  intentionally not ported until there is data for it.
+- The gate is strict `<`: `seam_quality_min = 0` disables conditioning, and a
+  seam at exactly the threshold stays naked.
+- A naked seam must never trim — without pre-roll there is no echo.
 - `console.print` needs `markup=False` for anything containing `[stt]`-style
   text, otherwise Rich eats the brackets.
 - `main.get_tui_settings()` reloads from `CONFIG_FILE`; tests only need to
@@ -37,4 +40,3 @@
   `PYNPUT_BACKEND=dummy` (not needed here — the suite ran without it).
 
 Last cleared: 2026-11-02.
-

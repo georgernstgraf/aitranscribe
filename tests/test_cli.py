@@ -1646,6 +1646,16 @@ def test_config_show_masks_keys(tmp_path):
     assert "whis…-key" in result.stdout or "whis…" in result.stdout
 
 
+def test_config_show_prints_the_seam_quality_gate(tmp_path):
+    config_file = tmp_path / "config.toml"
+    config_file.write_text(MIXED_CONFIG)
+    with patch("main.CONFIG_FILE", config_file):
+        result = runner.invoke(app, ["config", "show"])
+
+    assert result.exit_code == 0
+    assert "seam_quality_min=10" in result.stdout
+
+
 def test_config_show_reveal_prints_full_key(tmp_path):
     config_file = tmp_path / "config.toml"
     config_file.write_text(MIXED_CONFIG)
