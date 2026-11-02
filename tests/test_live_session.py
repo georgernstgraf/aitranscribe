@@ -65,7 +65,7 @@ def read_log(tmp_path) -> list[dict]:
 def test_fragments_are_transcribed_serially_and_joined_in_order(monkeypatch, tmp_path):
     calls: list[str] = []
 
-    def fake_transcribe(client, path, model):
+    def fake_transcribe(client, path, model, **kwargs):
         calls.append(path)
         return f"f{len(calls) - 1}", "de"
 
@@ -85,7 +85,7 @@ def test_fragments_are_transcribed_serially_and_joined_in_order(monkeypatch, tmp
 def test_partial_text_grows_with_every_committed_fragment(monkeypatch, tmp_path):
     partials: list[str] = []
 
-    def fake_transcribe(client, path, model):
+    def fake_transcribe(client, path, model, **kwargs):
         return f"part{len(partials)}", None
 
     monkeypatch.setattr(main, "transcribe_audio", fake_transcribe)
@@ -104,7 +104,7 @@ def test_partial_text_grows_with_every_committed_fragment(monkeypatch, tmp_path)
 
 
 def test_every_fragment_writes_one_log_line_and_a_summary(monkeypatch, tmp_path):
-    def fake_transcribe(client, path, model):
+    def fake_transcribe(client, path, model, **kwargs):
         return "text", "de"
 
     monkeypatch.setattr(main, "transcribe_audio", fake_transcribe)
@@ -140,11 +140,11 @@ def test_every_fragment_writes_one_log_line_and_a_summary(monkeypatch, tmp_path)
 def test_a_failed_fragment_is_logged_and_partial_text_is_delivered(monkeypatch, tmp_path):
     calls = {"count": 0}
 
-    def flaky_transcribe(client, path, model):
+    def flaky_transcribe(client, path, model, **kwargs):
         calls["count"] += 1
         if calls["count"] == 1:
             raise RuntimeError("upstream 500")
-        return "survivor", None
+        return f"survivor{calls['count']}", None
 
     monkeypatch.setattr(main, "transcribe_audio", flaky_transcribe)
     session = make_session(monkeypatch, tmp_path)
@@ -163,11 +163,11 @@ def test_a_failed_fragment_is_logged_and_partial_text_is_delivered(monkeypatch, 
     assert "upstream 500" in errors[0]["message"]
     assert summary["errors"] == 1
     requests = [record for record in records if record["event"] == "stt_request"]
-    assert raw == " ".join(["survivor"] * len(requests))
+    assert raw == " ".join(f"survivor{index}" for index in range(2, calls["count"] + 1))
 
 
 def test_a_completely_failed_session_raises(monkeypatch, tmp_path):
-    def broken_transcribe(client, path, model):
+    def broken_transcribe(client, path, model, **kwargs):
         raise ConnectionError("host not found")
 
     monkeypatch.setattr(main, "transcribe_audio", broken_transcribe)
@@ -194,7 +194,7 @@ def test_upload_format_comes_from_the_endpoint_profile(monkeypatch, tmp_path):
         return target
 
     monkeypatch.setattr(main, "encode_fragment", fake_encode)
-    monkeypatch.setattr(main, "transcribe_audio", lambda client, path, model: ("text", None))
+    monkeypatch.setattr(main, "transcribe_audio", lambda client, path, model, **kwargs: ("text", None))
     session = make_session(monkeypatch, tmp_path, upload_format="mp3")
 
     session.start()
@@ -207,7 +207,7 @@ def test_upload_format_comes_from_the_endpoint_profile(monkeypatch, tmp_path):
 
 
 def test_archive_mp3_encodes_the_full_recording(monkeypatch, tmp_path):
-    monkeypatch.setattr(main, "transcribe_audio", lambda client, path, model: ("text", None))
+    monkeypatch.setattr(main, "transcribe_audio", lambda client, path, model, **kwargs: ("text", None))
     session = make_session(monkeypatch, tmp_path)
     pcm = burst_train()
     target = tmp_path / "archive.mp3"
@@ -246,3 +246,112 @@ def test_cleanup_is_idempotent(monkeypatch, tmp_path):
     session.abort()
 
     session.cleanup()  # must not raise
+
+
+# --------------------------------------------------------------------------- #
+# Seam conditioning (pre-roll, prompt carry-over, echo trim)
+# --------------------------------------------------------------------------- #
+def test_second_fragment_upload_carries_one_second_of_pre_roll(monkeypatch, tmp_path):
+    lengths: list[int] = []
+
+    def fake_encode(pcm, sample_rate, output_path, upload_format="none"):
+        lengths.append(len(pcm))
+        target = str(Path(output_path).with_suffix(".wav"))
+        Path(target).write_bytes(b"x")
+        return target
+
+    monkeypatch.setattr(main, "encode_fragment", fake_encode)
+    monkeypatch.setattr(
+        main, "transcribe_audio", lambda client, path, model, **kwargs: ("text", None)
+    )
+    session = make_session(monkeypatch, tmp_path)
+
+    session.start()
+    feed(session, burst_train())
+    session.finish()
+    session.cleanup()
+
+    records = [record for record in read_log(tmp_path) if record["event"] == "stt_request"]
+    assert len(records) >= 2
+    assert lengths[0] == round(records[0]["audio_duration_ms"] * SR / 1000)
+    for length, record in zip(lengths[1:], records[1:]):
+        expected = record["audio_duration_ms"] * SR / 1000 + SR  # + 1 s pre-roll
+        assert abs(length - expected) <= 32
+
+
+def test_prompt_carry_over_uses_the_previous_transcript(monkeypatch, tmp_path):
+    prompts: list[str | None] = []
+
+    def fake_transcribe(client, path, model, prompt=None, on_prompt_rejected=None):
+        prompts.append(prompt)
+        return f"fragment{len(prompts) - 1} text", None
+
+    monkeypatch.setattr(main, "transcribe_audio", fake_transcribe)
+    session = make_session(monkeypatch, tmp_path)
+
+    session.start()
+    feed(session, burst_train())
+    session.finish()
+    session.cleanup()
+
+    assert len(prompts) >= 2
+    assert prompts[0] is None
+    assert prompts[1] == "fragment0 text"
+    assert all(prompt is not None for prompt in prompts[1:])
+
+
+def test_echo_trim_removes_the_repeated_seam_words(monkeypatch, tmp_path):
+    def fake_transcribe(client, path, model, **kwargs):
+        return "und den Schnitt Danach geht es weiter.", None
+
+    monkeypatch.setattr(main, "transcribe_audio", fake_transcribe)
+    session = make_session(monkeypatch, tmp_path)
+
+    session.start()
+    feed(session, burst_train())
+    raw = session.finish()
+    session.cleanup()
+
+    assert raw.count("Danach") == 1
+
+
+def test_rejected_prompt_disables_prompts_for_the_session(monkeypatch, tmp_path):
+    prompts: list[str | None] = []
+
+    def fake_transcribe(client, path, model, prompt=None, on_prompt_rejected=None):
+        prompts.append(prompt)
+        if prompt is not None and on_prompt_rejected is not None:
+            on_prompt_rejected()
+        return f"text{len(prompts)}", None
+
+    monkeypatch.setattr(main, "transcribe_audio", fake_transcribe)
+    session = make_session(monkeypatch, tmp_path)
+
+    session.start()
+    feed(session, burst_train())
+    session.finish()
+    session.cleanup()
+
+    assert len(prompts) >= 3
+    assert prompts[0] is None
+    assert prompts[1] is not None
+    assert all(prompt is None for prompt in prompts[2:])
+
+
+def test_log_records_prompt_chars_and_pre_roll_ms(monkeypatch, tmp_path):
+    def fake_transcribe(client, path, model, **kwargs):
+        return "ein Text", None
+
+    monkeypatch.setattr(main, "transcribe_audio", fake_transcribe)
+    session = make_session(monkeypatch, tmp_path)
+
+    session.start()
+    feed(session, burst_train())
+    session.finish()
+    session.cleanup()
+
+    records = [record for record in read_log(tmp_path) if record["event"] == "stt_request"]
+    assert records[0]["prompt_chars"] == 0
+    assert records[0]["pre_roll_ms"] == 0
+    assert records[1]["prompt_chars"] > 0
+    assert records[1]["pre_roll_ms"] == 1000

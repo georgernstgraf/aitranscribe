@@ -226,6 +226,13 @@ whole take. Every request appends one JSONL line to
 duration, upload format, request bytes, request duration), API errors get their
 own lines, and the stop tap writes a summary line.
 
+**Seam conditioning** (`seam.py`): every fragment seam gets the last second of
+the previous fragment as acoustic pre-roll, a prompt built from the previous
+transcript tail (≤96 characters), and an echo trim that removes a transcript
+head repeating the previous tail (≤8 tokens, head token must match, one
+mismatch tolerated). A service that rejects the prompt with HTTP 400 is retried
+without it, and prompts are disabled for the rest of the session.
+
 ### Built-in provider defaults
 
 A known profile id needs no `base_url`/`model` of its own:

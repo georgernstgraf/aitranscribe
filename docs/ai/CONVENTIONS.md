@@ -85,3 +85,7 @@ Follow these without question. Do not deviate unless explicitly told.
 - **Fragment** = one committed, gapless piece of a live recording. **Chunk** stays reserved for the post-hoc `chunk_audio` split of a file.
 - One STT log line per fragment request, one per API error, one summary at the stop tap; JSONL under `$XDG_STATE_HOME/aitranscribe/stt_requests.jsonl`.
 - A fragment's upload format comes from the active STT profile (`upload_format`), never from a global constant.
+
+## 2026-11-02: Seam vocabulary (#89)
+- **Naht**, **Pre-roll**, **Prompt-Carry-over**, **Echo-Trim** are the canonical terms (glossary: `CONTEXT.md`). Avoid "overlap", "context audio", "deduplication".
+- Seam conditioning lives in `seam.py` (`seam_prompt`, `trim_echo`) and is applied by the serial transcriber in `LiveTranscriptionSession._transcribe_loop`.

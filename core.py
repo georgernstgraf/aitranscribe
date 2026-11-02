@@ -3,6 +3,7 @@ import os
 import re
 import subprocess
 from pathlib import Path
+from typing import Callable
 
 import numpy as np
 from openai import BadRequestError, OpenAI
@@ -271,7 +272,13 @@ def chunk_audio(file_path: str, max_size_mb: int = MAX_AUDIO_SIZE_MB, max_durati
 
     return chunks
 
-def transcribe_audio(client: OpenAI, file_path: str, stt_model: str) -> tuple[str, str | None]:
+def transcribe_audio(
+    client: OpenAI,
+    file_path: str,
+    stt_model: str,
+    prompt: str | None = None,
+    on_prompt_rejected: Callable[[], None] | None = None,
+) -> tuple[str, str | None]:
     """Transcribes a single audio file, returning (text, detected_language).
 
     The transcript is rebuilt from the word-level timestamps when the service
@@ -280,6 +287,10 @@ def transcribe_audio(client: OpenAI, file_path: str, stt_model: str) -> tuple[st
     `words[]` stays correct — see docs/ai/PITFALLS.md. Without word timestamps
     (models that reject the parameter) the plain `text` is used; the
     GROQ_MAX_UPLOAD_S upload cap keeps that path correct too.
+
+    `prompt` is the seam carry-over (see seam.py). A service that rejects it
+    with HTTP 400 is retried without the prompt, and `on_prompt_rejected` is
+    called so the caller can stop sending prompts for the session.
     """
     if not os.path.isfile(file_path):
         raise FileNotFoundError(f"Audio file not found: {file_path}")
@@ -289,13 +300,27 @@ def transcribe_audio(client: OpenAI, file_path: str, stt_model: str) -> tuple[st
             "file": audio_file,
             "response_format": "verbose_json",
         }
+        if prompt:
+            request["prompt"] = prompt
         try:
             transcript = client.audio.transcriptions.create(
                 **request, timestamp_granularities=["word"]
             )
         except BadRequestError:
             audio_file.seek(0)
-            transcript = client.audio.transcriptions.create(**request)
+            if prompt:
+                request.pop("prompt", None)
+                if on_prompt_rejected is not None:
+                    on_prompt_rejected()
+                try:
+                    transcript = client.audio.transcriptions.create(
+                        **request, timestamp_granularities=["word"]
+                    )
+                except BadRequestError:
+                    audio_file.seek(0)
+                    transcript = client.audio.transcriptions.create(**request)
+            else:
+                transcript = client.audio.transcriptions.create(**request)
     language = getattr(transcript, "language", None)
     words = getattr(transcript, "words", None) or []
     text = " ".join(word.word for word in words) if words else str(transcript.text)

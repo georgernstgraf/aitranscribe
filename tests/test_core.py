@@ -545,3 +545,70 @@ def test_encode_fragment_raises_when_ffmpeg_produces_nothing(tmp_path):
     with patch("core._ffmpeg"):
         with pytest.raises(RuntimeError, match="produced no output"):
             encode_fragment(_tone(), 16000, str(tmp_path / "f.wav"), "mp3")
+
+
+# --- transcribe_audio: seam prompt handling ---
+
+class _RejectsWordTimestamps(Exception):
+    """Stand-in for BadRequestError: the service rejected a request parameter."""
+
+
+def test_transcribe_audio_sends_the_seam_prompt(tmp_path):
+    src = tmp_path / "frag.wav"
+    src.write_bytes(b"audio-bytes")
+    client = MagicMock()
+    verbose = MagicMock(spec=["text"])
+    verbose.text = "hello"
+    client.audio.transcriptions.create.return_value = verbose
+
+    transcribe_audio(client, str(src), "m", prompt="die letzten Worte")
+
+    assert client.audio.transcriptions.create.call_args.kwargs["prompt"] == "die letzten Worte"
+
+
+def test_transcribe_audio_retries_without_a_rejected_prompt(tmp_path):
+    src = tmp_path / "frag.wav"
+    src.write_bytes(b"audio-bytes")
+    client = MagicMock()
+    verbose = MagicMock(spec=["text"])
+    verbose.text = "hello"
+    client.audio.transcriptions.create.side_effect = [_RejectsWordTimestamps(), verbose]
+    rejected: list[bool] = []
+
+    with patch("core.BadRequestError", _RejectsWordTimestamps):
+        result = transcribe_audio(
+            client, str(src), "m", prompt="prompt", on_prompt_rejected=lambda: rejected.append(True)
+        )
+
+    assert result == ("hello", None)
+    assert rejected == [True]
+    calls = client.audio.transcriptions.create.call_args_list
+    assert calls[0].kwargs["prompt"] == "prompt"
+    assert "prompt" not in calls[1].kwargs
+
+
+def test_transcribe_audio_prompt_rejection_falls_back_to_plain_text(tmp_path):
+    """A service that rejects both the prompt and word timestamps still answers."""
+    src = tmp_path / "frag.wav"
+    src.write_bytes(b"audio-bytes")
+    client = MagicMock()
+    verbose = MagicMock(spec=["text"])
+    verbose.text = "hello"
+    client.audio.transcriptions.create.side_effect = [
+        _RejectsWordTimestamps(),
+        _RejectsWordTimestamps(),
+        verbose,
+    ]
+    rejected: list[bool] = []
+
+    with patch("core.BadRequestError", _RejectsWordTimestamps):
+        result = transcribe_audio(
+            client, str(src), "m", prompt="prompt", on_prompt_rejected=lambda: rejected.append(True)
+        )
+
+    assert result == ("hello", None)
+    assert rejected == [True]
+    calls = client.audio.transcriptions.create.call_args_list
+    assert len(calls) == 3
+    assert "prompt" not in calls[1].kwargs
+    assert "timestamp_granularities" not in calls[2].kwargs

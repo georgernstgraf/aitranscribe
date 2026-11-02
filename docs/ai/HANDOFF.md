@@ -1,17 +1,18 @@
 # Handoff
 
-## 2026-11-02 session: live fragmentation + per-fragment STT logging (#88)
-- Shipped the port of polished-recognition's `FragmentPreparer`:
-  `fragmenter.py` (SilenceQuality + worker loop), `main.LiveTranscriptionSession`,
-  `main.process_live_recording`, `stt_log.py`, `[recording]` config section and
-  `upload_format` on the STT profile.
-- Capture is now 16 kHz mono; the TUI streams into the session instead of
-  buffering the take. `--file` still uses the post-hoc `chunk_audio` path.
-- Glossary: `CONTEXT.md` (Fragmenttakt, Suchfenster, Fragment, Festschreibung,
-  erzwungener Schnitt, Restfragment, Q). No guard zone / LATE_HALF by design.
-- 311 tests green (was 257); real end-to-end against selfhosted-1 verified.
-- No pending implementation tasks. #89 (seam conditioning) is the open
-  follow-up sub-issue; do not close #88 before it.
+## 2026-11-02 session: seam conditioning (#89, follow-up of #88)
+- Shipped `seam.py`: `seam_prompt()` (previous transcript tail, ≤96 chars,
+  word-aligned) and `trim_echo()` (≤8 tokens, head token must match, ≤1
+  mismatch for k≥2, no match keeps everything).
+- `LiveTranscriptionSession._transcribe_loop` now composes `pre_roll +
+  fragment` as one upload (1 s pre-roll), sends the prompt, and trims the echo
+  against the **untrimmed** previous transcript. `core.transcribe_audio` gained
+  `prompt` and `on_prompt_rejected` (HTTP 400 → retry bare, prompts off for the
+  session).
+- Log lines gained `prompt_chars` and `pre_roll_ms`.
+- 331 tests green; real end-to-end against selfhosted-1 shows pre_roll 1000 ms,
+  prompts 41–54 chars, no duplicated seam words.
+- No pending implementation tasks.
 
 ## Notes for the next agent
 - Never add a scope-level override (e.g. `[stt].model`): one value, one place —
@@ -19,6 +20,10 @@
 - The fragmenter decides only when the full Suchfenster is recorded; the tail
   at the stop tap can therefore be `cut_interval + search_window` long. That is
   the stop→raw bound, not a bug.
+- Echo trim compares against the untrimmed previous transcript; comparing
+  against the trimmed text cascades (see PITFALLS).
+- The seam measures are unconditional. The original's `Q < qualityMin` gate is
+  intentionally not ported until there is data for it.
 - `console.print` needs `markup=False` for anything containing `[stt]`-style
   text, otherwise Rich eats the brackets.
 - `main.get_tui_settings()` reloads from `CONFIG_FILE`; tests only need to
@@ -32,3 +37,4 @@
   `PYNPUT_BACKEND=dummy` (not needed here — the suite ran without it).
 
 Last cleared: 2026-11-02.
+

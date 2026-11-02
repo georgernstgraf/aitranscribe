@@ -43,6 +43,29 @@ The deficit area of a silence candidate under the adaptive axis
 at the candidate's area centroid, clamped 150 ms inside it.
 _Avoid_: Silence score, confidence
 
+### Seams
+
+**Naht**:
+A fragment boundary — the place where one fragment's audio ends and the next
+begins.
+_Avoid_: Seam point, splice
+
+**Pre-roll**:
+The last second of the previous fragment's audio, prepended to the next upload
+so the service hears the words on both sides of the naht.
+_Avoid_: Overlap, context audio
+
+**Prompt-Carry-over**:
+The seam-local prompt built from the previous transcript tail (≤96 characters,
+cut at a word boundary).
+_Avoid_: Context prompt, carry prompt
+
+**Echo-Trim**:
+Removal of a transcript head that repeats the previous transcript tail (≤8
+tokens, head token must match, at most one mismatch for k ≥ 2). Without a match
+everything is kept.
+_Avoid_: Deduplication, overlap trim
+
 ### Transcription
 
 **Profil**:

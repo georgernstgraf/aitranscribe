@@ -262,3 +262,10 @@ Each entry documents WHAT was decided and WHY.
 - **Upload format**: `upload_format` on the STT profile (`none` = PCM WAV without ffmpeg, `ogg` = Opus 24k, `mp3` = 32k), default `none`.
 - **No fallback path**: the live path replaces the microphone path outright; the archive MP3 is encoded after the raw transcript is delivered.
 - **Tradeoff**: the worst-case tail fragment is `cut_interval + search_window` (50 s at the 45/5 defaults), so stop→raw is bounded by one fragment upload, not by the take length.
+
+## 2026-11-02: Seam Conditioning At Every Seam, No Q Gate Yet (#89)
+- **Choice**: Every fragment seam gets pre-roll (1 s of the previous fragment), a prompt from the previous transcript tail (≤96 chars) and an echo trim (≤8 tokens, head token must match, ≤1 mismatch for k≥2). The measures are applied unconditionally; the original's `Q < qualityMin` stitch gate is not ported yet.
+- **Reason**: With ~45 s fragments every seam is a place where Whisper can lose context or repeat words. The original's gate exists to save requests when a seam already sits in a good pause; without our own data a gate would only hide failures.
+- **Composition happens in the transcriber thread, not at commit time**: the prompt needs the previous fragment's transcript, which only the serial consumer has. The upload is one encoded file of `pre_roll + fragment`, so the format (WAV/OGG/MP3) needs no concatenation rules.
+- **Prompt rejection**: an HTTP 400 with a prompt is retried without it and `on_prompt_rejected` disables prompts for the rest of the session (matches the original).
+- **Tradeoff**: every upload is ~1 s longer and carries a prompt, so request bytes grow (~30 % at 3 s fragments, ~2 % at 45 s). Echo trim is deliberately conservative and may leave a duplicate when punctuation differs.

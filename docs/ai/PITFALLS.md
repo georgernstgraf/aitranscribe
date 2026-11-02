@@ -86,3 +86,9 @@ Read this file carefully before making changes in affected areas.
 - **`upload_format` belongs to the profile.** Never add a scope-level override (the repo rule is one value, one place).
 - **`STT_LOG_FILE` is part of the test isolation contract.** `tests/conftest.py` repoints it; a new default path must be added there too or the suite writes into `$HOME`.
 - **The TUI only creates a live session when `live_session_factory` is injected.** Tests that call `start_recording()` without it get no session (and `finish_recording()` treats that as "no audio").
+
+## 2026-11-02: Seam conditioning details (#89)
+- **Echo trim must compare against the UNTRIMMED previous transcript.** The echo of the next seam repeats the previous fragment's *audio* tail, which corresponds to its full transcript. Comparing against the trimmed text would cascade: a fully trimmed fragment (empty text) disables the next comparison and the duplicate returns.
+- **Punctuation counts as a token mismatch.** `Schnitt` vs `Schnitt.` is one mismatch; two such differences exceed the tolerance and nothing is trimmed (conservative by design). Do not "fix" this by stripping punctuation without a decision — the conservative direction is the safety guarantee.
+- **A prompt rejection is a session-wide switch.** `on_prompt_rejected` sets `_prompts_enabled = False`; do not retry prompts per fragment.
+- **The pre-roll makes the upload ~1 s longer.** `request_bytes` in the log includes it; the `pre_roll_ms` field records it per fragment.

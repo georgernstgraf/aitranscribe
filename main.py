@@ -22,6 +22,7 @@ from rich.progress import Progress, TextColumn
 from openai import OpenAI
 from pynput import keyboard
 import config
+import seam
 import stt_log
 from fragmenter import FragmentPreparer
 from core import (
@@ -1025,6 +1026,9 @@ class LiveTranscriptionSession:
         self._log = stt_log.SttRequestLog(log_path or STT_LOG_FILE)
         self._started_at = time.monotonic()
         self._finished = False
+        # Seam conditioning (seam.py): pre-roll length and prompt availability.
+        self._pre_roll_samples = int(round(seam.PRE_ROLL_SECONDS * RECORDING_SAMPLE_RATE))
+        self._prompts_enabled = True
 
         self.fragmenter = FragmentPreparer(
             sample_rate=RECORDING_SAMPLE_RATE,
@@ -1101,30 +1105,73 @@ class LiveTranscriptionSession:
         self._archive.write(fragment.pcm.tobytes())
         self._fragments += 1
         self._audio_ms += fragment.duration_ms
-        path = encode_fragment(
-            fragment.pcm,
-            fragment.sample_rate,
-            os.path.join(self._work_dir, f"frag_{fragment.index:06d}.wav"),
-            self.upload_format,
-        )
-        self._queue.put((fragment, path))
+        self._queue.put(fragment)
 
     def _transcribe_loop(self) -> None:
+        """Serial consumer: compose the seam upload, transcribe, trim the echo."""
+        previous_text = ""
+        previous_tail: np.ndarray | None = None
         while True:
             item = self._queue.get()
             try:
                 if item is None:
                     return
-                fragment, path = item
-                self._transcribe_fragment(fragment, path)
+                fragment = item
+                pre_roll = previous_tail if fragment.index > 0 else None
+                prompt = None
+                if fragment.index > 0 and self._prompts_enabled:
+                    prompt = seam.seam_prompt(previous_text)
+                pcm = fragment.pcm
+                if pre_roll is not None:
+                    pcm = np.concatenate([pre_roll, fragment.pcm])
+                path = encode_fragment(
+                    pcm,
+                    fragment.sample_rate,
+                    os.path.join(self._work_dir, f"frag_{fragment.index:06d}.wav"),
+                    self.upload_format,
+                )
+                pre_roll_ms = (
+                    int(round(len(pre_roll) * 1000 / fragment.sample_rate))
+                    if pre_roll is not None else 0
+                )
+                text = self._transcribe_fragment(
+                    fragment, path, prompt=prompt, pre_roll_ms=pre_roll_ms
+                )
+                if text is not None:
+                    trimmed = seam.trim_echo(text, previous_text) if previous_text else text
+                    self._record_text(fragment.index, trimmed)
+                    # The echo of the NEXT seam repeats this fragment's audio tail,
+                    # so the untrimmed text is what the next seam is compared to.
+                    previous_text = text
+                previous_tail = fragment.pcm[-self._pre_roll_samples:].copy()
             finally:
                 self._queue.task_done()
 
-    def _transcribe_fragment(self, fragment, path: str) -> None:
-        request_bytes = stt_log.estimate_request_bytes(path, self.stt_model)
+    def _record_text(self, index: int, text: str) -> None:
+        with self._lock:
+            self._texts[index] = text
+            joined = self._joined_locked()
+        if self.on_partial_text is not None:
+            self.on_partial_text(joined)
+
+    def _transcribe_fragment(
+        self,
+        fragment,
+        path: str,
+        *,
+        prompt: str | None = None,
+        pre_roll_ms: int = 0,
+    ) -> str | None:
+        request_bytes = stt_log.estimate_request_bytes(path, self.stt_model, prompt or "")
         started = time.perf_counter()
         try:
-            text, language = transcribe_audio(require_stt_client(), path, self.stt_model)
+            text, language = transcribe_audio(
+                require_stt_client(),
+                path,
+                self.stt_model,
+                prompt=prompt,
+                on_prompt_rejected=self._disable_prompts,
+            )
         except Exception as exc:
             self._errors += 1
             if self._error is None:
@@ -1137,7 +1184,7 @@ class LiveTranscriptionSession:
                 status_code=getattr(exc, "status_code", None),
                 message=str(exc),
             )
-            return
+            return None
         finally:
             if os.path.exists(path):
                 os.remove(path)
@@ -1155,14 +1202,17 @@ class LiveTranscriptionSession:
             duration_ms=duration_ms,
             silence_aligned=fragment.silence_aligned,
             quality=fragment.quality,
+            prompt_chars=len(prompt or ""),
+            pre_roll_ms=pre_roll_ms,
         )
         with self._lock:
-            self._texts[fragment.index] = text
             if self.detected_language is None and language:
                 self.detected_language = language
-            joined = self._joined_locked()
-        if self.on_partial_text is not None:
-            self.on_partial_text(joined)
+        return text
+
+    def _disable_prompts(self) -> None:
+        """The service rejected the prompt: stop sending them for this session."""
+        self._prompts_enabled = False
 
     def _joined_locked(self) -> str:
         return " ".join(
