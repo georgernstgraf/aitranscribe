@@ -309,6 +309,32 @@ PROMPTS: dict | None = None
 
 _PRE_PROCESS_MODES = {"raw", "cleanup", "english"}
 
+# CLI flags of the three modes, in the wording of the TUI's Recording Mode radios.
+_PRE_PROCESS_MODE_FLAGS = {
+    "raw": "--raw",
+    "cleanup": "--cleanup-only",
+    "english": "--english",
+}
+
+_PRE_PROCESS_MODE_LABELS = {
+    "raw": "Raw transcription",
+    "cleanup": "Cleanup Only",
+    "english": "Cleanup + Translate to English",
+}
+
+
+def resolve_pre_process_mode(raw: bool, cleanup: bool, english: bool) -> str:
+    """Map the mutually exclusive CLI mode flags onto a pre-process mode."""
+    selected = [
+        name
+        for name, flag in (("raw", raw), ("cleanup", cleanup), ("english", english))
+        if flag
+    ]
+    if len(selected) > 1:
+        flags = ", ".join(_PRE_PROCESS_MODE_FLAGS[name] for name in selected)
+        raise ValueError(f"Options {flags} are mutually exclusive; pick one mode.")
+    return selected[0] if selected else "raw"
+
 
 def _format_source_language_clause(source_language: str | None) -> str:
     """Build the source-language sentence for the system prompt, '' if unknown."""
@@ -555,7 +581,13 @@ llm_client: OpenAI | None = None
 
 # Option Factory Functions
 def post_process_option():
-    return typer.Option(False, "--post-process", "-p", help="Refine text: correct grammar, remove fillers, and structure clearly")
+    return typer.Option(False, "--post-process", "-p", "--cleanup-only", help="Cleanup Only: correct grammar, remove fillers, and structure clearly")
+
+def raw_option():
+    return typer.Option(False, "--raw", help="Raw transcription, no LLM post-processing (default)")
+
+def output_option():
+    return typer.Option(None, "--output", "-o", help="Write the transcript to this file")
 
 def stt_model_option():
     return typer.Option(None, help="STT model override for this run (default: model of the active STT profile)")
@@ -1753,6 +1785,8 @@ def main(
     query_prompt: bool = query_prompt_option(),
     remove_prompt: int | None = remove_prompt_option(),
     english: bool = english_option(),
+    raw: bool = raw_option(),
+    output: str | None = output_option(),
     llm_model: str | None = llm_model_option(),
     post_process: bool = post_process_option(),
     stt_model: str | None = stt_model_option(),
@@ -1803,6 +1837,8 @@ def main(
             query_prompt,
             remove_prompt is not None,
             english,
+            raw,
+            output is not None,
             post_process,
             verbose,
             stt_model != STT_MODEL,
@@ -1814,9 +1850,11 @@ def main(
         launch_tui(width_override=width)
         raise typer.Exit(code=0)
 
-    # Enforce mutual exclusivity between --english and --post-process
-    if english and post_process:
-        console.print("Error: Options --english and --post-process are mutually exclusive.")
+    # The three mode flags mirror the TUI's Recording Mode radios.
+    try:
+        mode = resolve_pre_process_mode(raw, post_process, english)
+    except ValueError as exc:
+        console.print(f"Error: {exc}")
         raise typer.Exit(code=1)
 
     # Handle prompt management commands
@@ -1843,18 +1881,32 @@ def main(
         raise typer.Exit(code=1)
 
     if file:
-        transcribe_file(file, stt_model, llm_model, post_process, verbose, english)
+        transcribe_file(file, stt_model, llm_model, mode, verbose, output)
     else:
-        record_from_microphone(stt_model, llm_model, post_process, verbose, english)
+        record_from_microphone(
+            stt_model, llm_model, mode == "cleanup", verbose, mode == "english"
+        )
 
-def transcribe_file(file_path: str, stt_model: str, llm_model: str, post_process: bool, verbose: bool, english: bool):
-    """Transcribe a local audio or video file using Groq STT and optionally process with LLM."""
+def transcribe_file(
+    file_path: str,
+    stt_model: str,
+    llm_model: str,
+    mode: str,
+    verbose: bool,
+    output: str | None = None,
+):
+    """Transcribe a local audio or video file, post-process per mode, store it.
+
+    ``mode`` is one of the TUI's Recording Mode radios (``raw``, ``cleanup``,
+    ``english``); exactly one result is printed, written to ``output`` and
+    stored in the prompt queue.
+    """
     file_path = normalize_file_path(file_path)
     if verbose:
         state["verbose"] = True
 
-    target_language = "English" if english else None
-    needs_llm = english or post_process
+    target_language = get_pre_process_prompt(mode)
+    needs_llm = mode != "raw"
 
     validate_api_keys("post_process" if needs_llm else None)
 
@@ -1871,8 +1923,6 @@ def transcribe_file(file_path: str, stt_model: str, llm_model: str, post_process
 
     try:
         file_path = prepare_file_for_transcription(file_path)
-        if needs_llm:
-            console.print(f"\nPost-Processing: {'Translate to English + Cleanup' if english else 'Cleanup'}")
 
         with Progress(
             TextColumn("{task.description}"),
@@ -1890,14 +1940,24 @@ def transcribe_file(file_path: str, stt_model: str, llm_model: str, post_process
                 on_progress=lambda message: progress.update(progress.task_ids[0], description=message),
             )
 
-        console.print("\nTranscription Complete:")
-        console.print(wrap_text(final_text))
+        # Exactly one result: no raw block in front of the polished one, and no
+        # rich markup parsing — transcripts contain bracketed noise like
+        # "[music]" that must survive verbatim.
+        label = _PRE_PROCESS_MODE_LABELS.get(mode, mode)
+        console.print(f"\n{label}:")
+        console.print(wrap_text(final_text), markup=False, highlight=False)
 
-        if needs_llm:
-            console.print("\nLLM Result:")
-            console.print(wrap_text(final_text))
+        if output:
+            target = os.path.abspath(os.path.expanduser(output))
+            try:
+                with open(target, "w", encoding="utf-8") as handle:
+                    handle.write(final_text.rstrip() + "\n")
+            except OSError as exc:
+                console.print(f"Error: Cannot write transcript to {target}: {exc}")
+                raise typer.Exit(code=1)
+            console.print(f"Written to {target}")
 
-        # Store post-processed or raw transcription in prompt queue
+        # Store the same text in the prompt queue (TUI history).
         prompt_manager.add_prompt(final_text, file_path)
 
     except Exception as e:

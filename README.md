@@ -115,7 +115,7 @@ Three modes control what happens after transcription:
 | Mode | Effect |
 |---|---|
 | **Raw transcription** | No LLM post-processing; the raw STT output is stored |
-| **Cleanup Text / Preserve Language** | LLM corrects grammar, removes filler words, structures the text |
+| **Cleanup Only** | LLM corrects grammar, removes filler words, structures the text |
 | **Cleanup + Translate to English** | LLM translates to English and cleans up |
 
 ### Append recording
@@ -127,17 +127,24 @@ Select a saved transcription from the list, press `A`, and speak. The new record
 When flags are provided, `aitranscribe` runs in CLI mode instead of launching the TUI.
 
 ```bash
-aitranscribe --file meeting.mp3                          # transcribe a file
-aitranscribe --file speech.mp3 --english                 # transcribe + translate to English
-aitranscribe --file podcast.mp3 --post-process           # transcribe + cleanup
-aitranscribe --post-process "Summarize this recording"   # custom LLM prompt
+aitranscribe --file meeting.mp3                          # transcribe a file (raw)
+aitranscribe --file meeting.mp3 --raw                    # ... explicit: Raw transcription
+aitranscribe --file podcast.mp3 --cleanup-only           # Cleanup Only (alias: -p)
+aitranscribe --file speech.mp3 --english                 # Cleanup + Translate to English
+aitranscribe --file lecture.m4a -o lecture.txt           # write the transcript to a file
 aitranscribe --width 120 --file meeting.mp3              # wrap output at 120 chars/line
 aitranscribe --list                                      # show stored transcriptions
 aitranscribe --query                                     # pop the oldest transcription
 aitranscribe --remove 3                                  # remove transcription #3
 ```
 
-`--english` and `--post-process` are mutually exclusive.
+`--raw`, `--cleanup-only` (and its aliases `--post-process`/`-p`) and `--english`
+are mutually exclusive — they mirror the three **Recording Mode** radios of the
+TUI, and the default is `--raw`. Exactly one result is printed: the output of
+the selected mode, with rich markup disabled so bracketed transcript noise like
+`[music]` survives verbatim. `-o`/`--output` additionally writes that same text
+to a file; the prompt queue (the TUI's **Transcriptions** history) stores it
+either way.
 
 ## Configuration
 

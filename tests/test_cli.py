@@ -22,6 +22,9 @@ try:
         llm_model_option,
         verbose_option,
         english_option,
+        raw_option,
+        output_option,
+        resolve_pre_process_mode,
         output_width_option,
         help_option,
         file_option,
@@ -1701,3 +1704,112 @@ def test_config_migrate_creates_toml_from_legacy(tmp_path):
     assert config_file.exists()
     assert "gsk_x" in config_file.read_text()
     assert not legacy.exists()
+
+
+# ==================== Recording Mode Flags (CLI) ====================
+
+def test_raw_option():
+    """--raw selects the 'Raw transcription' mode explicitly."""
+    option = raw_option()
+    assert isinstance(option, typer.models.OptionInfo)
+    assert "--raw" in option.param_decls
+    assert option.default is False
+
+
+def test_output_option():
+    """--output/-o writes the transcript to a file; unset by default."""
+    option = output_option()
+    assert isinstance(option, typer.models.OptionInfo)
+    assert "--output" in option.param_decls
+    assert "-o" in option.param_decls
+    assert option.default is None
+
+
+def test_post_process_option_has_cleanup_only_alias():
+    """-p carries the TUI wording 'Cleanup Only' as an alias."""
+    option = post_process_option()
+    assert "-p" in option.param_decls
+    assert "--post-process" in option.param_decls
+    assert "--cleanup-only" in option.param_decls
+
+
+def test_resolve_pre_process_mode_defaults_to_raw():
+    assert resolve_pre_process_mode(False, False, False) == "raw"
+
+
+@pytest.mark.parametrize(
+    "raw,cleanup,english,expected",
+    [
+        (True, False, False, "raw"),
+        (False, True, False, "cleanup"),
+        (False, False, True, "english"),
+    ],
+)
+def test_resolve_pre_process_mode_maps_flags(raw, cleanup, english, expected):
+    assert resolve_pre_process_mode(raw, cleanup, english) == expected
+
+
+def test_resolve_pre_process_mode_rejects_multiple_modes():
+    with pytest.raises(ValueError, match="mutually exclusive"):
+        resolve_pre_process_mode(True, True, False)
+
+    with pytest.raises(ValueError, match="--raw, --cleanup-only"):
+        resolve_pre_process_mode(True, True, False)
+
+
+def test_cli_rejects_two_mode_flags():
+    """The CLI enforces the RadioSet behaviour of the TUI."""
+    result = runner.invoke(app, ["--raw", "--cleanup-only"])
+    assert result.exit_code == 1
+    assert "mutually exclusive" in result.stdout
+
+
+def test_transcribe_file_prints_one_result_and_writes_output(tmp_path):
+    """One mode, one result — no raw block in front of the polished one."""
+    import main
+
+    src = tmp_path / "clip.m4a"
+    src.write_bytes(b"fake-audio")
+    out = tmp_path / "transcript.txt"
+    fake_manager = MagicMock()
+
+    with patch.object(main, "prompt_manager", fake_manager), \
+         patch.object(main, "prepare_file_for_transcription", side_effect=lambda p: p), \
+         patch.object(main, "run_transcription_pipeline", return_value=("[music] raw words", "[music] raw words")), \
+         patch.object(main, "console") as mock_console:
+        main.transcribe_file(str(src), "m", "m", "raw", False, str(out))
+
+    assert out.read_text(encoding="utf-8").strip() == "[music] raw words"
+    fake_manager.add_prompt.assert_called_once_with("[music] raw words", str(src))
+
+    printed = [str(call.args[0]) for call in mock_console.print.call_args_list if call.args]
+    assert any("Raw transcription" in line for line in printed)
+    assert not any("Transcription Complete" in line for line in printed)
+    assert not any("LLM Result" in line for line in printed)
+
+
+@pytest.mark.parametrize(
+    "mode,needs_llm,target_language",
+    [
+        ("raw", False, None),
+        ("cleanup", True, None),
+        ("english", True, "English"),
+    ],
+)
+def test_transcribe_file_mode_controls_pipeline(tmp_path, mode, needs_llm, target_language):
+    """The three modes map onto the pipeline flags the TUI uses."""
+    import main
+
+    src = tmp_path / "clip.m4a"
+    src.write_bytes(b"fake-audio")
+
+    with patch.object(main, "prompt_manager", MagicMock()), \
+         patch.object(main, "validate_api_keys"), \
+         patch.object(main, "prepare_file_for_transcription", side_effect=lambda p: p), \
+         patch.object(main, "run_transcription_pipeline", return_value=("text", "text")) as mock_pipeline, \
+         patch.object(main, "console"):
+        main.transcribe_file(str(src), "m", "m", mode, False)
+
+    kwargs = mock_pipeline.call_args.kwargs
+    assert kwargs["needs_llm"] is needs_llm
+    assert kwargs["target_language"] == target_language
