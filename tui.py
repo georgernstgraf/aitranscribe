@@ -940,6 +940,12 @@ class AitranscribeTUI(App[None]):
 
     def action_escape_key(self) -> None:
         if self.is_recording:
+            if self.is_pane_focus_mode():
+                # ESC in Pane Focus Mode only returns to Command Mode; an
+                # active dictation must never be discarded by accident.
+                self.screen.set_focus(None)
+                self.refresh_status()
+                return
             self.cancel_recording()
         else:
             self.action_enter_command_mode()

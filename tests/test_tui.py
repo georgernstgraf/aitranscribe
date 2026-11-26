@@ -1425,6 +1425,51 @@ async def test_escape_cancels_active_recording_and_discards_text():
 
 
 @pytest.mark.anyio
+async def test_escape_in_pane_focus_mode_during_recording_keeps_recording():
+    prompt_manager = Mock()
+    prompt_manager.count_prompts.return_value = 0
+    prompt_manager.recent_prompts.return_value = []
+
+    app = AitranscribeTUI(
+        prompt_manager=prompt_manager,
+        process_audio=Mock(),
+        process_file=Mock(),
+        stt_provider_name="Groq",
+        llm_provider_name="openrouter",
+        default_stt_model="whisper",
+        default_llm_model="gpt",
+        initial_settings={"pre_process_mode": "english", "input_source": "microphone"},
+    )
+
+    async with app.run_test() as pilot:
+        app.is_recording = True
+        app.latest_transcript = "Recording in progress..."
+        app.raw_transcript = "partial"
+        app.set_focus(app.query_one("#history_list", OptionList))
+        await pilot.pause()
+        assert app.is_pane_focus_mode() is True
+
+        with patch.object(app.recorder, "stop") as mock_stop:
+            app.action_escape_key()
+            await pilot.pause()
+
+        mock_stop.assert_not_called()
+        assert app.is_recording is True
+        assert app.is_command_mode() is True
+        assert app.latest_transcript == "Recording in progress..."
+        assert app.raw_transcript == "partial"
+
+        # Second ESC in Command Mode deliberately cancels the recording.
+        with patch.object(app.recorder, "stop") as mock_stop:
+            app.action_escape_key()
+            await pilot.pause()
+
+        mock_stop.assert_called_once()
+        assert app.is_recording is False
+        assert app.latest_transcript == "No transcript yet."
+
+
+@pytest.mark.anyio
 async def test_escape_cancel_in_append_mode_keeps_selected_transcript():
     prompt_manager = Mock()
     prompt_manager.count_prompts.return_value = 1
