@@ -34,3 +34,12 @@ Since #73 the translation clause travels in the system prompt
 (`{{target_language_clause}}`) and `build_post_process_messages` substitutes only
 `{{text}}` in the user template, so a `{{translate}}` left in a customized template reaches
 the model verbatim.
+
+## 2026-11-26 (FIXED 2026-11-26, origin: PITFALLS.md, reason: fixed in #92)
+### ESC during recording always cancelled the dictation, even from Pane Focus Mode
+`action_escape_key` called `cancel_recording()` whenever `is_recording` was true,
+regardless of focus mode. Clicking back into the app after a window-focus switch
+entered Pane Focus Mode (click focuses the widget under the cursor), and the only
+way out — ESC — silently discarded the running dictation. Fix: two-stage ESC
+(Pane Focus Mode → `set_focus(None)` only; cancel only from Command Mode),
+commit 277e2f6, test `test_escape_in_pane_focus_mode_during_recording_keeps_recording`.

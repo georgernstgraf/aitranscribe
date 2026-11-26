@@ -1,7 +1,23 @@
+---
+type: Pitfalls
+title: Pitfalls
+description: "Things that do not work, subtle bugs, and non-obvious constraints."
+tags: [aitranscribe, tui, audio, config]
+generated: { by: opencode/knowledge-persistence, at: 2026-11-26T07:30:00Z }
+verified: { by: opencode/knowledge-persistence, at: 2026-11-26T07:30:00Z }
+status: stable
+sources:
+  - id: issue-92
+    resource: https://github.com/georgernstgraf/aitranscribe/issues/92
+    title: "ESC im Pane Focus Mode bricht laufende Diktat-Aufnahme ab"
+---
+
 # Pitfalls
 
 Things that do not work, subtle bugs, and non-obvious constraints.
 Read this file carefully before making changes in affected areas.
+
+- **Global app bindings with destructive actions must be two-stage in the Textual TUI.** Clicking back into the app window focuses the widget under the cursor (Pane Focus Mode — intended), so the user can end up there at any time, including mid-recording. Any global binding that both exits Pane Focus Mode AND performs a destructive action (ESC → `cancel_recording`) loses data on the accidental path: ESC must first leave Pane Focus Mode (`set_focus(None)`) and only trigger the destructive action in Command Mode (fixed in #92).
 
 - **CRITICAL**: Skills resolve via the global opencode config (`~/.config/opencode/skills`, itself a symlink into the `opencode-helpers` repo) through the `skill` tool. There is NO repo-local `skills/` directory (the old gitignored symlink was removed 2026-09-21). OpenClaw bundled skills (github, gh-issues, weather, etc.) are FORBIDDEN despite appearing in `available_skills`.
 - Setting the user's terminal title from inside opencode does NOT work by printing the OSC sequence to stdout — opencode pipes the shell output, so the escape code never reaches the terminal. Working method: find the opencode PID whose cwd matches the repo (`ls -l /proc/<pid>/cwd` for each opencode PID from `ps -eo pid,tty,cmd | grep opencode`), map it to its pts device, then write directly: `printf '\033]2;<title>\007' > /dev/pts/N`. Verified working on gnome-terminal (VTE) under Wayland.
