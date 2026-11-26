@@ -1288,8 +1288,18 @@ class AitranscribeTUI(App[None]):
         self.refresh_transcript()
         self.refresh_status()
         self.refresh_history()
+        self.auto_copy_transcript(text)
         if prompt_id:
             self.run_worker(lambda: self.generate_summary_for_prompt_worker(int(prompt_id), self.latest_transcript), thread=True, exclusive=False)
+
+    def auto_copy_transcript(self, text: str) -> None:
+        """Copy the finished transcript to the clipboard without user action."""
+        if not text or text == "No transcript returned.":
+            return
+        if copy_text_to_clipboard(text):
+            self.set_status_message("Transcript copied to clipboard.")
+        else:
+            self.set_status_message("Auto-copy to clipboard failed (no clipboard tool).")
 
     def backfill_summaries_worker(self) -> None:
         if self.backfill_summaries is None:

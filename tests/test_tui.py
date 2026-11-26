@@ -586,12 +586,13 @@ async def test_processing_finished_empty_raw_text_not_replaced_by_stale():
     )
 
     async with app.run_test():
-        app.raw_transcript = "Stale value"
-        app.processing_finished({"text": "Final", "raw_text": "", "prompt_id": "", "file_path": ""})
-        assert app.raw_transcript == ""
+        with patch("tui.copy_text_to_clipboard", return_value=True):
+            app.raw_transcript = "Stale value"
+            app.processing_finished({"text": "Final", "raw_text": "", "prompt_id": "", "file_path": ""})
+            assert app.raw_transcript == ""
 
-        app.processing_finished({"text": "Final", "prompt_id": "", "file_path": ""})
-        assert app.raw_transcript == ""
+            app.processing_finished({"text": "Final", "prompt_id": "", "file_path": ""})
+            assert app.raw_transcript == ""
 
 
 @pytest.mark.anyio
@@ -750,7 +751,8 @@ def test_processing_finished_updates_selected_prompt_in_append_mode():
         with patch.object(app, "refresh_status") as mock_status:
             with patch.object(app, "refresh_history") as mock_history:
                 with patch.object(app, "run_worker") as mock_worker:
-                    app.processing_finished({"text": "Second transcript", "file_path": "/tmp/a.mp3", "prompt_id": "99"})
+                    with patch("tui.copy_text_to_clipboard", return_value=True):
+                        app.processing_finished({"text": "Second transcript", "file_path": "/tmp/a.mp3", "prompt_id": "99"})
 
     prompt_manager.update_prompt.assert_called_once_with(7, "First transcript\n\nSecond transcript")
     assert app.latest_transcript == "First transcript\n\nSecond transcript"
@@ -763,6 +765,88 @@ def test_processing_finished_updates_selected_prompt_in_append_mode():
     mock_status.assert_called_once()
     mock_history.assert_called_once()
     mock_worker.assert_called_once()
+
+
+@pytest.mark.anyio
+async def test_processing_finished_copies_transcript_to_clipboard():
+    prompt_manager = Mock()
+    prompt_manager.count_prompts.return_value = 0
+    prompt_manager.recent_prompts.return_value = []
+
+    app = AitranscribeTUI(
+        prompt_manager=prompt_manager,
+        process_audio=Mock(),
+        process_file=Mock(),
+        stt_provider_name="Groq",
+        llm_provider_name="openrouter",
+        default_stt_model="whisper",
+        default_llm_model="gpt",
+        initial_settings={"pre_process_mode": "english", "input_source": "microphone"},
+    )
+
+    async with app.run_test():
+        with patch("tui.copy_text_to_clipboard", return_value=True) as mock_copy:
+            app.processing_finished({"text": "Final transcript", "file_path": "/tmp/a.mp3", "prompt_id": ""})
+
+    mock_copy.assert_called_once_with("Final transcript")
+    assert app.status_text == "Transcript copied to clipboard."
+
+
+@pytest.mark.anyio
+async def test_processing_finished_copies_combined_text_in_append_mode():
+    prompt_manager = Mock()
+    prompt_manager.count_prompts.return_value = 0
+    prompt_manager.recent_prompts.return_value = []
+    prompt_manager.update_prompt.return_value = True
+
+    app = AitranscribeTUI(
+        prompt_manager=prompt_manager,
+        process_audio=Mock(),
+        process_file=Mock(),
+        stt_provider_name="Groq",
+        llm_provider_name="openrouter",
+        default_stt_model="whisper",
+        default_llm_model="gpt",
+        initial_settings={"pre_process_mode": "english", "input_source": "microphone"},
+    )
+
+    app.append_mode = True
+    app.append_target_id = 7
+    app.append_base_text = "First transcript"
+
+    async with app.run_test():
+        with patch("tui.copy_text_to_clipboard", return_value=True) as mock_copy:
+            app.processing_finished({"text": "Second transcript", "file_path": "/tmp/a.mp3", "prompt_id": "99"})
+
+    mock_copy.assert_called_once_with("First transcript\n\nSecond transcript")
+    assert app.status_text == "Transcript copied to clipboard."
+
+
+@pytest.mark.anyio
+async def test_processing_finished_auto_copy_failure_shows_status_only():
+    prompt_manager = Mock()
+    prompt_manager.count_prompts.return_value = 0
+    prompt_manager.recent_prompts.return_value = []
+
+    app = AitranscribeTUI(
+        prompt_manager=prompt_manager,
+        process_audio=Mock(),
+        process_file=Mock(),
+        stt_provider_name="Groq",
+        llm_provider_name="openrouter",
+        default_stt_model="whisper",
+        default_llm_model="gpt",
+        initial_settings={"pre_process_mode": "english", "input_source": "microphone"},
+    )
+
+    async with app.run_test():
+        with patch("tui.copy_text_to_clipboard", return_value=False):
+            with patch.object(app, "push_screen") as mock_screen:
+                app.processing_finished({"text": "Final transcript", "file_path": "/tmp/a.mp3", "prompt_id": ""})
+
+    assert app.status_text == "Auto-copy to clipboard failed (no clipboard tool)."
+    mock_screen.assert_not_called()
+    assert app.latest_transcript == "Final transcript"
 
 
 def test_action_append_recording_requires_selected_saved_transcript():
@@ -1211,8 +1295,9 @@ async def test_processing_finished_starts_background_summary_generation_for_save
     )
 
     async with app.run_test():
-        app.processing_finished({"text": "Fresh transcript", "file_path": "/tmp/a.mp3", "prompt_id": "7"})
-        await app.workers.wait_for_complete()
+        with patch("tui.copy_text_to_clipboard", return_value=True):
+            app.processing_finished({"text": "Fresh transcript", "file_path": "/tmp/a.mp3", "prompt_id": "7"})
+            await app.workers.wait_for_complete()
 
     prompt_manager.update_prompt_summary.assert_called_with(7, "Generated summary")
 
@@ -1247,7 +1332,8 @@ async def test_summary_completion_does_not_clobber_editor_edits():
     )
 
     async with app.run_test() as pilot:
-        app.processing_finished({"text": "Fresh transcript", "file_path": "/tmp/a.mp3", "prompt_id": "7"})
+        with patch("tui.copy_text_to_clipboard", return_value=True):
+            app.processing_finished({"text": "Fresh transcript", "file_path": "/tmp/a.mp3", "prompt_id": "7"})
         await pilot.pause()
         editor = app.query_one("#transcript_editor", TextArea)
         editor.text = "User typed edits"
