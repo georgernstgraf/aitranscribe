@@ -3,8 +3,8 @@ type: State
 title: Project State
 description: "Current project status — overwritten on every persistence run."
 tags: [aitranscribe]
-generated: { by: opencode/knowledge-persistence, at: 2026-11-26T07:30:00Z }
-verified: { by: opencode/knowledge-persistence, at: 2026-11-26T07:30:00Z }
+generated: { by: opencode/knowledge-persistence, at: 2026-11-26T08:10:00Z }
+verified: { by: opencode/knowledge-persistence, at: 2026-11-26T08:10:00Z }
 status: stable
 sources:
   - id: issue-92
@@ -14,12 +14,10 @@ sources:
 
 # Project State
 
-2026-11-26: Fixed #92 — ESC in Pane Focus Mode no longer cancels an active
-recording. `action_escape_key` is two-stage: Pane Focus Mode → only
-`set_focus(None)` (dictation keeps running); cancel-by-ESC stays exclusive to
-Command Mode. Test
-`test_escape_in_pane_focus_mode_during_recording_keeps_recording` pins the
-contract. **355 tests pass.**
+2026-11-26: #92 fixed (two-stage ESC, see PITFALLS). #93 shipped: the finished
+transcript is **always** auto-copied to the clipboard in `processing_finished()`
+(`auto_copy_transcript`, xclip → xsel → OSC52; append mode copies the full
+combined text; failure is status-message-only). **358 tests pass.**
 
 ## Current Focus
 
@@ -30,7 +28,7 @@ or `config.py` since 2026-11-02.
 
 ## Verification
 
-- `./venv/bin/pytest -q`: **355 passed** (was 340).
+- `./venv/bin/pytest -q`: **358 passed** (was 340).
 
 ## Blockers
 
