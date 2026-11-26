@@ -1,3 +1,17 @@
+---
+type: State
+title: Project State
+description: "Current project status — overwritten on every persistence run."
+tags: [aitranscribe]
+generated: { by: opencode/knowledge-persistence, at: 2026-11-26T07:30:00Z }
+verified: { by: opencode/knowledge-persistence, at: 2026-11-26T07:30:00Z }
+status: stable
+sources:
+  - id: issue-92
+    resource: https://github.com/georgernstgraf/aitranscribe/issues/92
+    title: "ESC im Pane Focus Mode bricht laufende Diktat-Aufnahme ab"
+---
+
 # Project State
 
 2026-11-26: Fixed #92 — ESC in Pane Focus Mode no longer cancels an active

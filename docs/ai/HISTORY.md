@@ -1,3 +1,12 @@
+---
+type: History Archive
+title: History
+description: "Append-only archive of superseded knowledge entries."
+tags: [aitranscribe]
+generated: { by: opencode/knowledge-persistence, at: 2026-11-26T07:30:00Z }
+status: stable
+---
+
 # History
 
 Append-only archive of superseded knowledge entries. Newer entries at the bottom.
