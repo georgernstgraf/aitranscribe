@@ -1,3 +1,12 @@
+---
+type: Domain Notes
+title: Domain Knowledge
+description: "Business rules and domain relationships not obvious from code."
+tags: [aitranscribe]
+generated: { by: opencode/knowledge-persistence, at: 2026-11-26T08:30:00Z }
+status: stable
+---
+
 # Domain Knowledge
 
 Business rules and domain relationships not obvious from code.

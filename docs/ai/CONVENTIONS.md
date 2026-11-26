@@ -1,3 +1,12 @@
+---
+type: Conventions
+title: Conventions
+description: "Coding patterns, naming rules, and style agreements for this project."
+tags: [aitranscribe]
+generated: { by: opencode/knowledge-persistence, at: 2026-11-26T08:30:00Z }
+status: stable
+---
+
 # Conventions
 
 Coding patterns, naming rules, and style agreements for this project.

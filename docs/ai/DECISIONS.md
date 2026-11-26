@@ -1,3 +1,12 @@
+---
+type: Decisions
+title: Decisions
+description: "Architectural and technical decisions made in this project — WHAT was decided and WHY."
+tags: [aitranscribe]
+generated: { by: opencode/knowledge-persistence, at: 2026-11-26T08:30:00Z }
+status: stable
+---
+
 # Decisions
 
 Architectural and technical decisions made in this project.
