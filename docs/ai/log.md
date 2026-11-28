@@ -1,5 +1,10 @@
 # Persistence Log
 
+## 2026-11-28
+- **Update** [STATE.md](STATE.md): status line rewritten — #94 shipped (OpenCode Go provider + session header), 361 tests green.
+- **Update** [PITFALLS.md](PITFALLS.md): 1 new entry — the Go endpoint refuses requests without `x-opencode-session` (400 MissingSessionID); header only for host `opencode.ai` + `/inference/go/`, live-verified both ways (#94).
+- **Update** [HANDOFF.md](HANDOFF.md): cleared — no pending tasks.
+
 ## 2026-11-26
 - **Update** [PITFALLS.md](PITFALLS.md): OKF envelope added; 1 new entry — global destructive bindings must be two-stage in the Textual TUI (#92). The fixed ESC bug itself moved to [HISTORY.md](HISTORY.md).
 - **Update** [HISTORY.md](HISTORY.md): 1 appended entry — ESC-during-recording cancel bug (fixed in #92, commit 277e2f6).

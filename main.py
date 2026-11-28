@@ -9,6 +9,8 @@ import tomllib
 import copy
 import queue
 import threading
+import uuid
+from urllib.parse import urlparse
 import tomlkit
 import typer
 import numpy as np
@@ -405,6 +407,46 @@ DEFAULT_VERBOSE_ERRORS: bool = False
 DEFAULT_OUTPUT_WIDTH: int = 80
 OUTPUT_WIDTH: int = DEFAULT_OUTPUT_WIDTH
 
+# OpenCode Go routing: ONLY this URL shape gets the session header — the
+# Console endpoint (…/inference/openai/…), other opencode.ai paths, every
+# foreign host and the whole STT path stay byte-identical. Without the header
+# the Go endpoint answers HTTP 400 "Request is missing x-opencode-session"
+# (owner device finding, polished-recognition #153).
+OPENCODE_GO_HOSTS = frozenset({"opencode.ai", "www.opencode.ai"})
+OPENCODE_GO_PATH_PREFIX = "/inference/go/"
+SESSION_ID_FILE = CONFIG_DIR / "opencode-session-id"
+
+
+def _is_opencode_go_url(base_url: str) -> bool:
+    """True only for the OpenCode Go endpoint (host opencode.ai, /inference/go/)."""
+    try:
+        parsed = urlparse(str(base_url))
+    except ValueError:
+        return False
+    return parsed.hostname in OPENCODE_GO_HOSTS and parsed.path.startswith(
+        OPENCODE_GO_PATH_PREFIX
+    )
+
+
+def _opencode_session_id() -> str:
+    """Stable per-install UUID, persisted once (mirrors polished-recognition's
+    `SettingsStore.opencodeSessionId`). Not in config.toml — the TUI rewrites it."""
+    try:
+        session_id = SESSION_ID_FILE.read_text(encoding="utf-8").strip()
+        if session_id:
+            return session_id
+    except OSError:
+        pass
+    session_id = str(uuid.uuid4())
+    try:
+        SESSION_ID_FILE.parent.mkdir(parents=True, exist_ok=True)
+        SESSION_ID_FILE.write_text(session_id + "\n", encoding="utf-8")
+        SESSION_ID_FILE.chmod(0o600)
+    except OSError:
+        pass  # best-effort; the endpoint refuses an invalid session loudly
+    return session_id
+
+
 def _build_client(endpoint: config.Endpoint | None) -> OpenAI | None:
     """OpenAI client for one endpoint, using only that endpoint's own key.
 
@@ -413,7 +455,12 @@ def _build_client(endpoint: config.Endpoint | None) -> OpenAI | None:
     """
     if endpoint is None or not endpoint.has_key:
         return None
-    return OpenAI(base_url=endpoint.base_url, api_key=endpoint.api_key)
+    headers = (
+        {"x-opencode-session": _opencode_session_id()}
+        if _is_opencode_go_url(endpoint.base_url)
+        else None
+    )
+    return OpenAI(base_url=endpoint.base_url, api_key=endpoint.api_key, default_headers=headers)
 
 _MSYS2_UCRT64_BIN = r"C:\msys64\ucrt64\bin"
 

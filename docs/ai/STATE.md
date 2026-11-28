@@ -14,21 +14,30 @@ sources:
 
 # Project State
 
-2026-11-26: #92 fixed (two-stage ESC, see PITFALLS). #93 shipped: the finished
-transcript is **always** auto-copied to the clipboard in `processing_finished()`
-(`auto_copy_transcript`, xclip → xsel → OSC52; append mode copies the full
-combined text; failure is status-message-only). **358 tests pass.**
+2026-11-28: #94 shipped — **OpenCode Go as LLM provider**: new
+`[llm.providers.opencodego]` profile (base_url
+`https://opencode.ai/inference/go/openai/v1/`, default model `glm-5.3-flash`,
+LLM-only in `PROVIDER_DEFAULTS`) and an automatic `x-opencode-session` header
+(`_build_client`): the Go endpoint refuses requests without it (HTTP 400
+`MissingSessionID`, live-verified both ways); the header goes ONLY to
+host `opencode.ai` + path prefix `/inference/go/` (Console endpoint, foreign
+hosts, STT untouched — mirrors polished-recognition's
+`OpenCodeSessionInterceptor`). The UUID is a stable per-install id persisted at
+`~/.config/aitranscribe/opencode-session-id` (0600), deliberately NOT in
+`config.toml` (the TUI rewrites that file). **361 tests pass.**
 
 ## Current Focus
 
-Live fragmentation pipeline is stable (#88/#89/#90 shipped). The 2026-11-26
-session touched only the TUI focus/ESC path (`tui.py`,
-`tests/test_tui.py`) — no changes to `fragmenter.py`, `seam.py`, `main.py`
-or `config.py` since 2026-11-02.
+Live fragmentation pipeline is stable (#88/#89/#90 shipped). The 2026-11-28
+session touched `main.py` (`_build_client` + two helpers), `config.py`
+(PROVIDER_DEFAULTS entry) and `tests/test_cli.py` — the TUI focus/ESC path is
+untouched since 2026-11-26.
 
 ## Verification
 
-- `./venv/bin/pytest -q`: **358 passed** (was 340).
+- `./venv/bin/pytest -q`: **361 passed** (was 358).
+- Live smoke test against the real Go endpoint: with header → completion
+  (`'OK'`), without header → HTTP 400 `MissingSessionID`.
 
 ## Blockers
 

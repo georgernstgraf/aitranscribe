@@ -1813,3 +1813,71 @@ def test_transcribe_file_mode_controls_pipeline(tmp_path, mode, needs_llm, targe
     kwargs = mock_pipeline.call_args.kwargs
     assert kwargs["needs_llm"] is needs_llm
     assert kwargs["target_language"] == target_language
+
+
+# --- OpenCode Go: automatic x-opencode-session header (issue #94) ---
+# Mirrors polished-recognition's OpenCodeSessionInterceptorTest: the Go endpoint
+# answers HTTP 400 without the header, and it must NEVER leak to any other URL.
+
+def test_is_opencode_go_url_matches_only_go_endpoint():
+    import main
+
+    # Go endpoint: host opencode.ai AND path prefix /inference/go/
+    assert main._is_opencode_go_url("https://opencode.ai/inference/go/openai/v1/")
+    assert main._is_opencode_go_url("https://www.opencode.ai/inference/go/openai/v1/")
+    # Console endpoint on the SAME host must NOT match (owner requirement).
+    assert not main._is_opencode_go_url("https://opencode.ai/inference/openai/v1/")
+    # Foreign hosts never match, even with the same path.
+    assert not main._is_opencode_go_url("https://evil.example/inference/go/openai/v1/")
+    assert not main._is_opencode_go_url("https://api.groq.com/openai/v1")
+
+
+def test_build_client_adds_session_header_only_for_go_url(tmp_path):
+    import main
+
+    session_file = tmp_path / "opencode-session-id"
+    go_endpoint = config.Endpoint(
+        name="opencodego", scope="llm",
+        base_url="https://opencode.ai/inference/go/openai/v1/",
+        model="glm-5.3-flash", api_keys=("oc_sk_test",),
+    )
+    console_endpoint = config.Endpoint(
+        name="console", scope="llm",
+        base_url="https://opencode.ai/inference/openai/v1/",
+        model="glm-5.3-flash", api_keys=("sk_test",),
+    )
+    foreign_endpoint = config.Endpoint(
+        name="groq", scope="llm",
+        base_url="https://api.groq.com/openai/v1",
+        model="m", api_keys=("gsk_test",),
+    )
+
+    with patch.object(main, "SESSION_ID_FILE", session_file):
+        go_client = main._build_client(go_endpoint)
+        console_client = main._build_client(console_endpoint)
+        foreign_client = main._build_client(foreign_endpoint)
+
+        # Go URL carries the header; the session id was created once and persisted.
+        assert go_client._custom_headers["x-opencode-session"]
+        session_id = session_file.read_text(encoding="utf-8").strip()
+        assert go_client._custom_headers["x-opencode-session"] == session_id
+        assert oct(session_file.stat().st_mode & 0o777) == "0o600"
+
+        # Stability: a second client reuses the SAME id (no regeneration).
+        again = main._build_client(go_endpoint)
+        assert again._custom_headers["x-opencode-session"] == session_id
+
+        # Console URL on the same host and foreign hosts stay byte-identical.
+        assert "x-opencode-session" not in console_client._custom_headers
+        assert "x-opencode-session" not in foreign_client._custom_headers
+
+
+def test_opencodego_provider_defaults_pin_go_url():
+    """Pins the preset URL/model against typos (cf. ProviderPresetLoaderTest)."""
+    import config as config_module
+
+    defaults = config_module.PROVIDER_DEFAULTS["opencodego"]
+    assert defaults["base_url"] == "https://opencode.ai/inference/go/openai/v1/"
+    assert defaults["llm_model"] == "glm-5.3-flash"
+    # LLM-only: no STT default — the Go endpoint does not serve whisper.
+    assert "stt_model" not in defaults

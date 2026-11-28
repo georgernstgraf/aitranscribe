@@ -63,6 +63,17 @@ base_url = "https://api.groq.com/openai/v1"
 api_key = "your_groq_api_key_here"
 model = "llama-3.3-70b-versatile"
 
+# OpenCode Go: LLM-only endpoint. It refuses requests without an
+# `x-opencode-session` header (HTTP 400 MissingSessionID); aitranscribe adds
+# that header automatically for this URL shape (host opencode.ai AND path
+# prefix /inference/go/) using a stable per-install UUID — no config needed.
+#
+# [llm.providers.opencodego]
+# description = "OpenCode Go (own agent endpoint)"
+# base_url    = "https://opencode.ai/inference/go/openai/v1/"
+# api_key     = "oc_sk_…"
+# model       = "glm-5.3-flash"
+
 # ── UI / runtime ────────────────────────────────────────────────
 [ui]
 pre_process_mode = "english"

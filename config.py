@@ -122,6 +122,13 @@ PROVIDER_DEFAULTS: dict[str, dict[str, Any]] = {
         "base_url": "https://api.cortecs.ai/v1",
         "llm_model": "qwen3.8-flash-next",
     },
+    # OpenCode Go: LLM-only. The Go endpoint REFUSES requests without an
+    # `x-opencode-session` header (HTTP 400) — main.py adds it automatically
+    # for this URL (host opencode.ai AND path prefix /inference/go/).
+    "opencodego": {
+        "base_url": "https://opencode.ai/inference/go/openai/v1/",
+        "llm_model": "glm-5.3-flash",
+    },
 }
 
 # Legacy provider ids that are not valid slugs.
